@@ -1,0 +1,32 @@
+{
+  "name": "ai-secretary-prototype",
+  "version": "1.0.0",
+  "description": "AI 秘书 Web 原型 - 钉钉身份识别 + 宜搭数据 + Claude 智能问答",
+  "type": "module",
+  "scripts": {
+    "start": "node start.cjs",
+    "dev": "concurrently \"node server.mjs\" \"vite\"",
+    "server": "node server.mjs",
+    "client": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.3.7",
+    "@material/web": "^2.5.0",
+    "antd": "^5.18.0",
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.11",
+    "echarts": "^5.5.0",
+    "echarts-for-react": "^3.0.2",
+    "express": "^4.19.2",
+    "mermaid": "^11.16.0",
+    "playwright": "^1.61.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^8.2.2",
+    "vite": "^5.3.1"
+  }
+}
