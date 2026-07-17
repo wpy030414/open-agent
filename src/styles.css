@@ -1,24 +1,27 @@
-/* ==================== MD3 暗色主题设计令牌 ==================== */
+/* ==================== MD3 浅色主题设计令牌（默认） ==================== */
 :root {
-  /* MD3 暗色颜色系统 */
-  --md-sys-color-primary: #d0bcff;
-  --md-sys-color-on-primary: #381e72;
-  --md-sys-color-primary-container: #4f378b;
-  --md-sys-color-on-primary-container: #eaddff;
-  --md-sys-color-secondary: #ccc2dc;
-  --md-sys-color-on-secondary: #332d41;
-  --md-sys-color-surface: #1c1b1f;
-  --md-sys-color-surface-dim: #141218;
-  --md-sys-color-surface-bright: #3b383e;
-  --md-sys-color-surface-container: #211f26;
-  --md-sys-color-surface-container-low: #1d1b20;
-  --md-sys-color-surface-container-high: #2b2930;
-  --md-sys-color-on-surface: #e6e1e5;
-  --md-sys-color-on-surface-variant: #cac4d0;
-  --md-sys-color-outline: #938f99;
-  --md-sys-color-outline-variant: #49454f;
-  --md-sys-color-error: #f2b8b5;
-  --md-sys-color-success: #81c784;
+  /* MD3 蓝色系颜色系统 */
+  --md-sys-color-primary: #0061a4;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #d1e4ff;
+  --md-sys-color-on-primary-container: #001d36;
+  --md-sys-color-secondary: #535f70;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-surface: #fafcff;
+  --md-sys-color-surface-dim: #dadadd;
+  --md-sys-color-surface-bright: #fafcff;
+  --md-sys-color-surface-container: #ecf2f8;
+  --md-sys-color-surface-container-low: #f2f4f6;
+  --md-sys-color-surface-container-high: #e6e8ea;
+  --md-sys-color-on-surface: #1a1c1e;
+  --md-sys-color-on-surface-variant: #43474e;
+  --md-sys-color-outline: #73777f;
+  --md-sys-color-outline-variant: #c3c7cf;
+  --md-sys-color-error: #ba1a1a;
+  --md-sys-color-success: #2e7d32;
+
+  /* 对话区背景色（纯白/纯黑） */
+  --chat-bg: #ffffff;
 
   /* MD3 字体 */
   --md-sys-typescale-font: 'Roboto', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -42,6 +45,31 @@
   --top-bar-height: 64px;
 }
 
+/* ==================== MD3 暗色主题设计令牌 ==================== */
+[data-theme="dark"] {
+  --md-sys-color-primary: #9fc9ff;
+  --md-sys-color-on-primary: #003258;
+  --md-sys-color-primary-container: #00497d;
+  --md-sys-color-on-primary-container: #d1e4ff;
+  --md-sys-color-secondary: #bbc7db;
+  --md-sys-color-on-secondary: #253140;
+  --md-sys-color-surface: #121316;
+  --md-sys-color-surface-dim: #121316;
+  --md-sys-color-surface-bright: #38393c;
+  --md-sys-color-surface-container: #1e2022;
+  --md-sys-color-surface-container-low: #1a1c1e;
+  --md-sys-color-surface-container-high: #282a2d;
+  --md-sys-color-on-surface: #e3e2e6;
+  --md-sys-color-on-surface-variant: #c3c7cf;
+  --md-sys-color-outline: #8d9199;
+  --md-sys-color-outline-variant: #43474e;
+  --md-sys-color-error: #ffb4ab;
+  --md-sys-color-success: #81c784;
+
+  /* 对话区背景色（纯黑） */
+  --chat-bg: #000000;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -59,26 +87,30 @@ body {
 /* ==================== 应用布局 ==================== */
 .app-layout {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   overflow: hidden;
 }
 
 /* ==================== 侧边栏 ==================== */
 .sidebar {
+  position: fixed;
+  top: var(--top-bar-height);
+  left: 0;
+  bottom: 0;
   width: var(--sidebar-width);
+  z-index: 10;
   background: var(--md-sys-color-surface);
   border-right: 1px solid var(--md-sys-color-outline-variant);
   display: flex;
   flex-direction: column;
-  position: relative;
-  transition: width 0.2s ease;
+  transition: width 0.2s ease, transform 0.2s ease;
   flex-shrink: 0;
 }
 
 .sidebar.collapsed {
-  width: 0;
-  overflow: hidden;
-  border-right: none;
+  transform: translateX(-100%);
+  box-shadow: none;
 }
 
 .sidebar-content {
@@ -228,29 +260,30 @@ body {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-/* 折叠按钮 */
-.collapse-btn {
-  position: absolute;
-  top: 20px;
-  right: -14px;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--md-sys-shape-corner-full);
-  background: var(--md-sys-color-surface-container-high);
-  border: 1px solid var(--md-sys-color-outline-variant);
-  color: var(--md-sys-color-on-surface-variant);
+/* 主题切换按钮 */
+.theme-toggle-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--md-sys-shape-corner-sm);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 12px;
   cursor: pointer;
-  z-index: 10;
-  transition: all 0.15s ease;
+  transition: all 0.2s;
+  width: 100%;
+  text-align: left;
 }
 
-.collapse-btn:hover {
-  background: var(--md-sys-color-primary);
-  color: var(--md-sys-color-on-primary);
-  border-color: var(--md-sys-color-primary);
+.theme-toggle-btn:hover {
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+}
+
+.theme-toggle-btn svg {
+  flex-shrink: 0;
 }
 
 /* ==================== 主区域 ==================== */
@@ -259,10 +292,12 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--md-sys-color-surface-dim);
+  background: var(--chat-bg);
 }
 
 .top-bar {
+  position: relative;
+  z-index: 20;
   height: var(--top-bar-height);
   background: var(--md-sys-color-surface);
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
@@ -284,7 +319,12 @@ body {
   background: transparent;
   color: var(--md-sys-color-on-surface-variant);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.menu-btn.collapsed {
+  color: var(--md-sys-color-primary);
 }
 
 .menu-btn:hover {
@@ -374,6 +414,14 @@ body {
   width: 100%;
   max-width: 720px;
   margin-bottom: 32px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* 对话页输入框容器：跟随窗口变长 */
+.chat-input-area .input-container {
+  max-width: none;
+  margin-bottom: 0;
 }
 
 .input-wrapper {
@@ -763,14 +811,9 @@ body {
 /* ==================== 响应式 ==================== */
 @media (max-width: 768px) {
   .sidebar {
-    position: absolute;
+    top: 0;
     z-index: 100;
-    height: 100%;
     box-shadow: var(--md-sys-elevation-3);
-  }
-
-  .sidebar.collapsed {
-    width: 0;
   }
 
   .quick-actions {

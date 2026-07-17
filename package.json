@@ -4,7 +4,7 @@
   "description": "AI 秘书 Web 原型 - 钉钉身份识别 + 宜搭数据 + Claude 智能问答",
   "type": "module",
   "scripts": {
-    "start": "node start.cjs",
+    "start": "node start.mjs",
     "dev": "concurrently \"node server.mjs\" \"vite\"",
     "server": "node server.mjs",
     "client": "vite",

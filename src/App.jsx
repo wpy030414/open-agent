@@ -5,26 +5,23 @@ import MermaidChart from './components/MermaidChart.jsx';
 import LoginPage from './components/LoginPage.jsx';
 import CallbackPage from './components/CallbackPage.jsx';
 import { useAuth, parseCallbackParams, getDingTalkLoginUrl } from './hooks/useAuth.js';
-
-// ==================== 快捷问题配置 ====================
-const QUICK_QUESTIONS = [
-  { icon: Icons.chart, text: '本月销售业绩如何？', module: 'sales' },
-  { icon: Icons.wallet, text: '公司利润和成本结构？', module: 'finance' },
-  { icon: Icons.people, text: '团队人效和绩效分布？', module: 'hr' },
-  { icon: Icons.rocket, text: '项目延期风险有哪些？', module: 'project' }
-];
-
-const MODULE_NAMES = {
-  sales: '销售管理',
-  finance: '财务模块',
-  hr: '人力资源',
-  project: '项目交付'
-};
+import { t, I18N } from './i18n.js';
 
 // ==================== 主应用 ====================
+const MODULE_NAMES = I18N.app.moduleNames;
+
 export default function App() {
   const { user, isLoggedIn, isLoading, login, logout, handleCallback } = useAuth();
   const [callbackHandled, setCallbackHandled] = useState(false);
+  const [theme, setTheme] = useState(() => localStorage.getItem('ai-secretary-theme') || 'light');
+
+  // 应用主题
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('ai-secretary-theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
   // 检查是否是回调页面
   const isCallbackPage = window.location.pathname === '/callback' ||
@@ -58,11 +55,11 @@ export default function App() {
     return <LoginPage onLogin={login} isLoading={isLoading} />;
   }
 
-  return <MainApp user={user} onLogout={logout} />;
+  return <MainApp user={user} onLogout={logout} theme={theme} toggleTheme={toggleTheme} />;
 }
 
 // ==================== 主应用界面（登录后）====================
-function MainApp({ user, onLogout }) {
+function MainApp({ user, onLogout, theme, toggleTheme }) {
   const [conversations, setConversations] = useState(() => {
     try {
       const saved = localStorage.getItem('ai-secretary-conversations');
@@ -75,8 +72,25 @@ function MainApp({ user, onLogout }) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [cachedModules, setCachedModules] = useState([]);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+
+  // 获取缓存模块列表，用于生成真实快捷问题
+  useEffect(() => {
+    fetch('/api/cache')
+      .then(res => res.json())
+      .then(data => {
+        const modules = Object.values(data.modules || {});
+        // 按数据量排序，取前 4 个
+        const sorted = modules
+          .filter(m => m.totalCount > 0)
+          .sort((a, b) => (b.totalCount || 0) - (a.totalCount || 0))
+          .slice(0, 4);
+        setCachedModules(sorted);
+      })
+      .catch(e => console.error('获取缓存模块失败:', e));
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('ai-secretary-conversations', JSON.stringify(conversations));
@@ -237,29 +251,27 @@ function MainApp({ user, onLogout }) {
           </nav>
 
           <div className="sidebar-footer">
-            <span className="model-badge">AI 秘书</span>
-            <span className="cache-info">数据每 6 小时更新</span>
+            <button className="theme-toggle-btn" onClick={toggleTheme} title={t('app.sidebar.footer.themeToggle')}>
+              {theme === 'dark' ? Icons.sun : Icons.moon}
+              <span>{theme === 'dark' ? '白日' : '黑夜'}</span>
+            </button>
           </div>
         </div>
-
-        <button className="collapse-btn" onClick={() => setCollapsed(true)} title="收起">
-          <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-            <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
-          </svg>
-        </button>
       </aside>
 
       {/* 主区域 */}
       <main className="main-area">
         <header className="top-bar">
-          {collapsed && (
-            <button className="menu-btn" onClick={() => setCollapsed(false)} title="展开">
-              {Icons.menu}
-            </button>
-          )}
+          <button
+            className={`menu-btn ${collapsed ? 'collapsed' : ''}`}
+            onClick={() => setCollapsed(!collapsed)}
+            title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+          >
+            {Icons.menu}
+          </button>
           <div className="brand">
             {Icons.robot}
-            <span>AI 秘书</span>
+            <span>{t('product.name')}</span>
           </div>
           <div className="top-bar-right">
             <div className="user-menu">
@@ -284,10 +296,10 @@ function MainApp({ user, onLogout }) {
             <div className="home-view">
               <div className="home-hero">
                 <div className="hero-icon">{Icons.robot}</div>
-                <h1 className="hero-title">您好，{user.userName}</h1>
+                <h1 className="hero-title">{t('app.home.greeting', { userName: user.userName })}</h1>
                 <p className="hero-subtitle">
-                  我是您的 AI 秘书，已接入公司全部业务数据<br />
-                  可以即时回答您的业务问询，并自动调取相关数据分析
+                  {t('app.home.subtitle')}<br />
+                  {t('app.home.subtitle2')}
                 </p>
               </div>
 
@@ -299,7 +311,7 @@ function MainApp({ user, onLogout }) {
                     value={input}
                     onChange={e => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="发送消息..."
+                    placeholder={t('app.home.inputPlaceholder')}
                     rows={1}
                   />
                   <button
@@ -310,20 +322,35 @@ function MainApp({ user, onLogout }) {
                     {Icons.send}
                   </button>
                 </div>
-                <div className="input-hint">AI 秘书会基于公司真实数据回答，但可能偶尔出错，请核查关键数据</div>
+                <div className="input-hint">{t('app.home.inputHint')}</div>
               </div>
 
               <div className="quick-actions">
-                {QUICK_QUESTIONS.map(q => (
-                  <button
-                    key={q.text}
-                    className="quick-action-btn"
-                    onClick={() => sendMessage(q.text)}
-                  >
-                    {q.icon}
-                    <span>{q.text}</span>
-                  </button>
-                ))}
+                {cachedModules.map((m, idx) => {
+                  const icons = [Icons.chart, Icons.rocket, Icons.people, Icons.wallet];
+                  const icon = icons[idx % icons.length];
+                  // 生成基于真实数据的问题
+                  let question;
+                  if (m.formName.includes('打卡') || m.formName.includes('考勤')) {
+                    question = `${m.formName}最新数据如何？共${m.totalCount}条记录`;
+                  } else if (m.formName.includes('申请') || m.formName.includes('审批')) {
+                    question = `${m.formName}有多少待处理？共${m.totalCount}条`;
+                  } else if (m.formName.includes('课程') || m.formName.includes('社团')) {
+                    question = `${m.formName}开展情况如何？共${m.totalCount}条记录`;
+                  } else {
+                    question = `${m.formName}数据概况？共${m.totalCount}条`;
+                  }
+                  return (
+                    <button
+                      key={m.formUuid || idx}
+                      className="quick-action-btn"
+                      onClick={() => sendMessage(question)}
+                    >
+                      {icon}
+                      <span>{question}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ) : (
@@ -341,7 +368,7 @@ function MainApp({ user, onLogout }) {
                         {msg.cacheHit && (
                           <div className="cache-badge">
                             <span className="cache-dot" />
-                            已调取 {MODULE_NAMES[msg.module] || '业务'} 数据
+                            {t('app.chat.cacheBadge', { module: MODULE_NAMES[msg.module] || t('app.chat.cacheBadgeDefault') })}
                           </div>
                         )}
                       </div>
@@ -354,7 +381,7 @@ function MainApp({ user, onLogout }) {
                         <div className="typing-indicator">
                           <span /><span /><span />
                         </div>
-                        <span className="loading-text">AI 正在分析数据...</span>
+                        <span className="loading-text">{t('app.chat.loading')}</span>
                       </div>
                     </div>
                   )}
@@ -370,7 +397,7 @@ function MainApp({ user, onLogout }) {
                       value={input}
                       onChange={e => setInput(e.target.value)}
                       onKeyDown={handleKeyDown}
-                      placeholder="发送消息..."
+                      placeholder={t('app.chat.inputPlaceholder')}
                       rows={1}
                     />
                     <button
@@ -381,7 +408,7 @@ function MainApp({ user, onLogout }) {
                       {Icons.send}
                     </button>
                   </div>
-                  <div className="input-hint">AI 秘书会基于公司真实数据回答，但可能偶尔出错，请核查关键数据</div>
+                  <div className="input-hint">{t('app.chat.inputHint')}</div>
                 </div>
               </div>
             </div>
@@ -422,7 +449,7 @@ function TextBlock({ content }) {
             <thead>
               <tr>
                 {tableRows[0].map((cell, i) => (
-                  <th key={i}>{cell.trim()}</th>
+                  <th key={i}>{renderInline(cell.trim())}</th>
                 ))}
               </tr>
             </thead>
@@ -430,7 +457,7 @@ function TextBlock({ content }) {
               {tableRows.slice(2).map((row, ri) => (
                 <tr key={ri}>
                   {row.map((cell, ci) => (
-                    <td key={ci}>{cell.trim()}</td>
+                    <td key={ci}>{renderInline(cell.trim())}</td>
                   ))}
                 </tr>
               ))}
@@ -462,9 +489,9 @@ function TextBlock({ content }) {
     }
 
     if (line.startsWith('## ')) {
-      elements.push(<h2 className="content-h2" key={idx}>{line.slice(3)}</h2>);
+      elements.push(<h2 className="content-h2" key={idx}>{renderInline(line.slice(3))}</h2>);
     } else if (line.startsWith('### ')) {
-      elements.push(<h3 className="content-h3" key={idx}>{line.slice(4)}</h3>);
+      elements.push(<h3 className="content-h3" key={idx}>{renderInline(line.slice(4))}</h3>);
     } else if (line.trim().startsWith('- ')) {
       const text = line.trim().slice(2);
       elements.push(
@@ -492,13 +519,14 @@ function TextBlock({ content }) {
 }
 
 function renderInline(text) {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return parts.map((part, i) => {
+  // 先处理行内代码，再处理粗体
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*(?!\*))/g);
+  return parts.filter(Boolean).map((part, i) => {
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={i} className="inline-code">{part.slice(1, -1)}</code>;
+    }
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={i}>{part.slice(2, -2)}</strong>;
-    }
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={i}>{part.slice(1, -1)}</code>;
     }
     return part;
   });

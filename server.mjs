@@ -88,8 +88,7 @@ class YidaAPI {
         _api: 'nattyFetch',
         _mock: 'false',
         pageIndex: 1,
-        pageSize: 50,
-        creator: this.userId
+        pageSize: 50
       }
     });
   }
@@ -102,12 +101,21 @@ class YidaAPI {
     });
   }
 
-  // 查询表单数据（列表）
+  // 查询表单数据（列表，非流程表单）
   async queryFormData(appType, formUuid, pageNo = 1, pageSize = 100) {
     return this.request(`/dingtalk/web/${appType}/v1/form/searchFormDatas.json`, {
       params: {
         formUuid,
         appType,
+        currentPage: pageNo,
+        pageSize
+      }
+    });
+  }
+  async queryProcessData(appType, formUuid, pageNo = 1, pageSize = 100) {
+    return this.request(`/dingtalk/web/${appType}/v1/process/getInstances.json`, {
+      params: {
+        formUuid,
         currentPage: pageNo,
         pageSize
       }
@@ -156,9 +164,14 @@ function precomputeCache() {
   if (yida.isAvailable()) {
     fetchYidaData()
       .then(data => {
-        CACHE.modules = data;
-        CACHE.dataSource = 'yida';
-        CACHE.lastUpdated = new Date().toISOString();
+        console.log(`[预计算] fetchYidaData 返回 ${Object.keys(data).length} 个模块`);
+        // 用 Object.assign 而不是重新赋值，避免闭包问题
+        Object.assign(CACHE, {
+          lastUpdated: new Date().toISOString(),
+          modules: data,
+          dataSource: 'yida'
+        });
+        console.log(`[预计算] CACHE.modules 现在共 ${Object.keys(CACHE.modules).length} 个模块`);
         console.log(`[${new Date().toISOString()}] 缓存更新完成（宜搭数据）`);
       })
       .catch(e => {
@@ -195,24 +208,44 @@ async function fetchYidaData() {
           console.log(`应用 ${appName} 的真实表单:`, realForms.length);
 
           if (realForms.length > 0) {
-            const form = realForms[0];
-            const formName = form.title?.zh_CN || form.formName || form.title;
-            const formData = await yida.queryFormData(appType, form.formUuid);
+            // 遍历所有表单，收集有数据的
+            const appModules = {};
+            for (const form of realForms) {
+              const formUuid = form.formUuid;
+              const formName = form.title?.zh_CN || form.formName || form.title;
+              const isProcess = form.formType === 'process';
+              try {
+                // 流程表单用流程 API，普通表单用表单 API
+                let formData;
+                if (isProcess) {
+                  formData = await yida.queryProcessData(appType, formUuid);
+                } else {
+                  formData = await yida.queryFormData(appType, formUuid);
+                }
+                const records = formData?.content?.data || formData?.data || [];
+                const totalCount = formData?.content?.totalCount || formData?.totalCount || 0;
 
-            const records = formData?.content?.data || formData?.data || [];
-            if (records.length > 0) {
-              const moduleName = matchModule(formName) || appType;
-              result[moduleName] = {
-                appName,
-                appType,
-                formName,
-                formUuid: form.formUuid,
-                records,
-                totalCount: formData.content?.totalCount || formData.totalCount || records.length,
-                lastUpdated: new Date().toISOString()
-              };
-              console.log(`  ✓ 模块「${moduleName}」加载 ${records.length} 条记录`);
+                if (records.length > 0) {
+                  const moduleName = matchModule(formName) || `${appType}_${formUuid.slice(-8)}`;
+                  appModules[moduleName] = {
+                    appName,
+                    appType,
+                    formName,
+                    formUuid,
+                    records,
+                    totalCount,
+                    lastUpdated: new Date().toISOString()
+                  };
+                  console.log(`  ✓ ${formName}: ${records.length} 条`);
+                }
+              } catch (e) {
+                console.log(`  ✗ ${formName}: 查询失败 - ${e.message}`);
+              }
             }
+
+            // 把这个应用的所有模块合并到结果
+            Object.assign(result, appModules);
+            console.log(`应用 ${appName} 合并后，result 共 ${Object.keys(result).length} 个模块`);
           }
         } catch (e) {
           console.error(`获取应用 ${appName} 数据失败:`, e.message);
@@ -257,7 +290,108 @@ setInterval(precomputeCache, 6 * 60 * 60 * 1000);
 
 // ==================== 意图识别 ====================
 
-function detectModule(message) {
+// 用 AI 做意图识别：从缓存的应用列表中选择最相关的
+async function detectModuleWithAI(message) {
+  if (!API_KEY || !message) return null;
+
+  // 如果没有缓存数据，直接返回 null
+  const availableModules = Object.keys(CACHE.modules);
+  if (availableModules.length === 0) return null;
+
+  // 构造模块描述列表给 AI，按数据量排序
+  const moduleList = availableModules
+    .map(key => {
+      const m = CACHE.modules[key];
+      return { key, ...m };
+    })
+    .sort((a, b) => (b.totalCount || 0) - (a.totalCount || 0))
+    .slice(0, 10) // 只给 AI 看数据量最大的 10 个模块
+    .map(m => `- ${m.key}: ${m.appName} / ${m.formName} (共 ${m.totalCount} 条记录)`)
+    .join('\n');
+
+  const prompt = `你是一个意图分类器。用户的问题是关于企业数据的。
+
+可用的业务模块：
+${moduleList}
+
+用户问题：${message}
+
+请从上述模块中选择最相关的一个。必须以 JSON 格式返回，格式为 {"module": "模块key"} 或 {"module": "none"}。不要返回其他内容。`;
+
+  try {
+    const response = await fetch(`${API_BASE}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: DEFAULT_MODEL,
+        max_tokens: 100,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if (!response.ok) {
+      console.error('意图识别 AI 调用失败:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    const result = data.content
+      .filter(c => c.type === 'text' || c.type === 'thinking')
+      .map(c => c.text || c.thinking || '')
+      .join('')
+      .trim();
+
+    console.log(`[意图识别] AI 原始返回: "${result}"`);
+
+    // 尝试解析 JSON
+    let moduleKey = null;
+    try {
+      // 提取 JSON 部分（可能前后有 thinking 内容）
+      const jsonMatch = result.match(/\{[^}]*"module"[^}]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        moduleKey = parsed.module;
+      }
+    } catch (e) {
+      console.log('[意图识别] JSON 解析失败，尝试直接匹配:', e.message);
+    }
+
+    // 如果 JSON 解析失败，尝试从文本中提取模块 key
+    if (!moduleKey) {
+      for (const key of availableModules) {
+        if (result.includes(key)) {
+          moduleKey = key;
+          break;
+        }
+      }
+    }
+
+    console.log(`[意图识别] 最终模块: ${moduleKey}`);
+
+    // 验证返回的 key 是否有效
+    if (moduleKey && availableModules.includes(moduleKey)) {
+      return moduleKey;
+    }
+
+    // 尝试模糊匹配
+    if (moduleKey) {
+      const fuzzy = availableModules.find(k => k.toLowerCase() === moduleKey.toLowerCase());
+      if (fuzzy) return fuzzy;
+    }
+
+    return null;
+  } catch (e) {
+    console.error('意图识别失败:', e.message);
+    return null;
+  }
+}
+
+// 兜底：关键词匹配（保留作为 fallback）
+function detectModuleByKeyword(message) {
   const msg = message.toLowerCase();
   let bestModule = null;
   let bestScore = 0;
@@ -388,15 +522,45 @@ app.post('/api/chat', async (req, res) => {
     });
   }
 
-  // 1️⃣ 意图识别
-  const detectedModule = detectModule(message);
-  console.log(`[Chat] 用户问题: "${message.slice(0, 30)}..." → 识别模块: ${detectedModule || '未识别'}`);
+  // 2️⃣ 意图识别 + 构造系统 prompt
+  // 只在首轮对话时做意图识别，后续轮复用之前的模块
+  let detectedModule = null;
+  let intentMethod = 'context';
 
-  // 2️⃣ 构造系统 prompt
+  // 从 history 的最后一条 assistant 消息推断是否已有模块上下文
+  const lastAssistantMsg = [...history].reverse().find(h => h.role === 'assistant');
+  if (lastAssistantMsg && lastAssistantMsg.module) {
+    // 复用上一轮的模块
+    detectedModule = lastAssistantMsg.module;
+    intentMethod = 'context-cached';
+  } else {
+    // 首轮：AI 意图识别
+    detectedModule = await detectModuleWithAI(message);
+    intentMethod = 'ai';
+    if (!detectedModule) {
+      detectedModule = detectModuleByKeyword(message);
+      intentMethod = 'keyword';
+    }
+  }
+
+  console.log(`[Chat] 用户问题: "${message.slice(0, 30)}..." → 识别模块: ${detectedModule || '未识别'} (${intentMethod})`);
+
   const systemPrompt = buildSystemPrompt(user, detectedModule);
 
+  // 3️⃣ 构造对话历史（包含之前的所有 user/assistant 消息）
+  const conversationHistory = history
+    .filter(h => h.role === 'user' || h.role === 'assistant')
+    .map(h => {
+      let content = h.content;
+      // 去掉之前注入的模块数据标记，保持对话干净
+      const dataMarker = '\n\n## 当前调取的业务模块：';
+      const idx = content.indexOf(dataMarker);
+      if (idx > -1) content = content.substring(0, idx);
+      return { role: h.role, content };
+    });
+
   try {
-    // 3️⃣ 调用 DeepSeek
+    // 4️⃣ 调用 DeepSeek
     const response = await fetch(`${API_BASE}/v1/messages`, {
       method: 'POST',
       headers: {
@@ -409,7 +573,7 @@ app.post('/api/chat', async (req, res) => {
         max_tokens: 2048,
         system: systemPrompt,
         messages: [
-          ...history.slice(-10).map(h => ({ role: h.role, content: h.content })),
+          ...conversationHistory.slice(-10),
           { role: 'user', content: message }
         ]
       })
@@ -446,18 +610,63 @@ function buildSystemPrompt(user, detectedModule) {
   let moduleContext = '';
 
   if (detectedModule && CACHE.modules[detectedModule]) {
-    const config = BUSINESS_MODULES[detectedModule];
-    moduleData = JSON.stringify(CACHE.modules[detectedModule], null, 2);
+    const moduleInfo = CACHE.modules[detectedModule];
+    const moduleName = moduleInfo.formName || moduleInfo.appName || detectedModule;
+
+    // 只给 AI 看摘要数据，避免 records 数组太大
+    const totalCount = moduleInfo.totalCount;
+
+    // 提取流程状态统计（如果有）
+    let processSummary = '';
+    const firstRecord = moduleInfo.records?.[0];
+    if (firstRecord && firstRecord.instanceStatus !== undefined) {
+      const statusCounts = {};
+      moduleInfo.records.forEach(r => {
+        const s = r.instanceStatus || 'UNKNOWN';
+        statusCounts[s] = (statusCounts[s] || 0) + 1;
+      });
+      // 统计总数需要所有记录，但我们只缓存了前 100 条
+      const sampleSize = moduleInfo.records.length;
+      processSummary = `
+### 流程状态分布（基于 ${sampleSize} 条样本，共 ${totalCount} 条记录）
+${Object.entries(statusCounts).map(([k, v]) => `- ${k}：${v} 条`).join('\n')}
+`;
+    }
+
+    const summary = {
+      appName: moduleInfo.appName,
+      formName: moduleInfo.formName,
+      totalCount: moduleInfo.totalCount,
+      lastUpdated: moduleInfo.lastUpdated,
+      sampleRecords: moduleInfo.records?.slice(0, 3).map(r => ({
+        ...r,
+        // 只保留关键字段
+        formData: r.formData || r.data,
+        title: r.title,
+        instanceStatus: r.instanceStatus,
+        approvedResult: r.approvedResult,
+        originator: r.originator?.name?.zh_CN || r.originator?.name,
+        gmtCreate: r.gmtCreate
+      })) || []
+    };
+    moduleData = JSON.stringify(summary, null, 2);
     moduleContext = `
-## 当前调取的业务模块：${config.name}
+## 当前调取的业务模块：${moduleName}
 
 数据来自: ${CACHE.dataSource === 'yida' ? '宜搭真实数据' : '模拟数据'}
-### ${config.name} 数据
+### ${moduleName} 数据摘要（共 ${totalCount} 条记录）
+${processSummary}
 ${moduleData}
 
 请基于以上数据回答用户问题，给出专业、简洁的分析。
 `;
   } else {
+    // 动态生成可用模块摘要
+    const availableModules = Object.entries(CACHE.modules).map(([key, m]) => {
+      const name = m.formName || m.appName || key;
+      return `- ${name}：${m.totalCount || 0} 条记录`;
+    }).join('\n');
+
     moduleContext = `
 ## 可用业务模块
 用户问题未明确指向特定模块，你可以：
@@ -465,11 +674,8 @@ ${moduleData}
 2. 或提供跨模块的综合分析
 3. 或询问用户想具体了解哪个模块
 
-各模块缓存数据摘要：
-- 销售管理：${CACHE.modules.sales?.totalOrders || 0} 笔订单
-- 财务模块：营收 ¥${(CACHE.modules.finance?.revenue || 0).toLocaleString()}
-- 人力资源：${CACHE.modules.hr?.headcount || 0} 人
-- 项目交付：${CACHE.modules.project?.total || 0} 个项目
+当前已缓存的业务模块：
+${availableModules || '暂无缓存数据'}
 `;
   }
 
