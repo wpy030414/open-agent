@@ -2,16 +2,34 @@ import React, { useEffect, useRef, useState } from 'react';
 
 let mermaidId = 0;
 let mermaidReady = false;
+let currentTheme = null;
 
-// 懒加载 mermaid（避免初始化问题）
-async function initMermaid() {
-  if (mermaidReady) return true;
+// 简单清洗：移除潜在的脚本注入
+function sanitizeSvg(svg) {
+  if (!svg) return svg;
+  // 移除 script 标签和 on* 事件处理器
+  return svg
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, '')
+    .replace(/\bon\w+\s*=\s*[^\s/>]+/gi, '');
+}
+
+// 获取当前主题
+function getCurrentTheme() {
+  return document.documentElement.getAttribute('data-theme') || 'light';
+}
+
+// 懒加载 mermaid
+async function initMermaid(theme) {
+  if (mermaidReady && theme === currentTheme) return true;
+
+  const isDark = theme === 'dark';
   try {
     const mermaid = (await import('mermaid')).default;
     mermaid.initialize({
       startOnLoad: false,
-      theme: 'dark',
-      themeVariables: {
+      theme: 'base',
+      themeVariables: isDark ? {
         primaryColor: '#4a4458',
         primaryTextColor: '#e6e1e5',
         primaryBorderColor: '#6750a4',
@@ -26,12 +44,28 @@ async function initMermaid() {
         edgeLabelBackground: '#1c1b1f',
         fontFamily: 'Roboto, "Noto Sans SC", sans-serif',
         fontSize: '14px'
+      } : {
+        primaryColor: '#d1e4ff',
+        primaryTextColor: '#001d36',
+        primaryBorderColor: '#0061a4',
+        lineColor: '#535f70',
+        secondaryColor: '#ecf2f8',
+        tertiaryColor: '#fafcff',
+        background: '#ffffff',
+        mainBkg: '#fafcff',
+        nodeBorder: '#0061a4',
+        clusterBkg: '#f2f4f6',
+        titleColor: '#1a1c1e',
+        edgeLabelBackground: '#ffffff',
+        fontFamily: 'Roboto, "Noto Sans SC", sans-serif',
+        fontSize: '14px'
       },
       flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' },
       sequence: { useMaxWidth: true, mirrorActors: false },
       gantt: { useMaxWidth: true }
     });
     mermaidReady = true;
+    currentTheme = theme;
     return true;
   } catch (e) {
     console.error('Mermaid init error:', e);
@@ -54,14 +88,15 @@ export default function MermaidChart({ chart }) {
 
       try {
         const mermaid = (await import('mermaid')).default;
-        if (!mermaidReady) {
-          await initMermaid();
+        const theme = getCurrentTheme();
+        if (!mermaidReady || theme !== currentTheme) {
+          await initMermaid(theme);
         }
         if (cancelled) return;
 
         const { svg } = await mermaid.render(idRef.current, chart);
         if (!cancelled) {
-          setSvgContent(svg);
+          setSvgContent(sanitizeSvg(svg));
         }
       } catch (e) {
         console.error('Mermaid render error:', e);

@@ -67,17 +67,20 @@ export const I18N = {
     },
     // 快捷问题
     quickQuestions: [
-      { icon: 'chart', text: '本月销售业绩如何？', module: 'sales' },
-      { icon: 'wallet', text: '公司利润和成本结构？', module: 'finance' },
-      { icon: 'people', text: '团队人效和绩效分布？', module: 'hr' },
-      { icon: 'rocket', text: '项目延期风险有哪些？', module: 'project' },
+      { icon: 'chart', text: '课后服务开展情况如何？', module: 'afterSchool' },
+      { icon: 'wallet', text: '采购申请有多少待处理？', module: 'procurement' },
+      { icon: 'people', text: '物品领用数据概况？', module: 'inventory' },
+      { icon: 'rocket', text: '用车申请有多少？', module: 'vehicle' },
     ],
     // 模块名称映射（用于 cache badge）
     moduleNames: {
-      sales: '销售管理',
-      finance: '财务模块',
+      afterSchool: '课后服务管理',
+      procurement: '采购管理',
+      inventory: '物品领用管理',
+      vehicle: '用车管理',
+      meeting: '会议管理',
+      student: '学生事务',
       hr: '人力资源',
-      project: '项目交付',
     },
   },
 

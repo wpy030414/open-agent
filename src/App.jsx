@@ -1,18 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { message } from 'antd';
 import Icons from './icons.jsx';
 import MermaidChart from './components/MermaidChart.jsx';
 import LoginPage from './components/LoginPage.jsx';
 import CallbackPage from './components/CallbackPage.jsx';
-import { useAuth, parseCallbackParams, getDingTalkLoginUrl } from './hooks/useAuth.js';
+import { useAuth } from './hooks/useAuth.js';
 import { t, I18N } from './i18n.js';
 
 // ==================== 主应用 ====================
 const MODULE_NAMES = I18N.app.moduleNames;
 
 export default function App() {
-  const { user, isLoggedIn, isLoading, login, logout, handleCallback } = useAuth();
-  const [callbackHandled, setCallbackHandled] = useState(false);
+  const { user, isLoggedIn, isLoading, loginMode, dingtalkConfig, startLogin, finishDingTalkLogin, logout } = useAuth();
   const [theme, setTheme] = useState(() => localStorage.getItem('ai-secretary-theme') || 'light');
 
   // 应用主题
@@ -23,36 +21,25 @@ export default function App() {
 
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
-  // 检查是否是回调页面
+  // 钉钉登录回调：URL 带 code= 即认为是 OAuth 回调
   const isCallbackPage = window.location.pathname === '/callback' ||
-    window.location.search.includes('code=') ||
-    window.location.search.includes('userId=');
+    window.location.search.includes('code=');
 
-  // 检查登录回调
-  useEffect(() => {
-    if (callbackHandled) return;
-
-    const callbackParams = parseCallbackParams();
-    if (callbackParams) {
-      setCallbackHandled(true);
-      handleCallback(callbackParams);
-    }
-  }, [handleCallback, callbackHandled]);
-
-  // 如果是回调页面，显示回调处理
-  if (isCallbackPage || (!isLoggedIn && window.location.search.includes('code='))) {
-    return (
-      <CallbackPage
-        onLoginSuccess={(userData) => {
-          window.location.href = '/';
-        }}
-      />
-    );
+  // 回调页：交给 CallbackPage 用授权码完成钉钉登录
+  if (isCallbackPage) {
+    return <CallbackPage finishDingTalkLogin={finishDingTalkLogin} />;
   }
 
-  // 如果未登录，显示登录页
+  // 未登录：按 loginMode 渲染本机免登 / 钉钉登录
   if (!isLoggedIn) {
-    return <LoginPage onLogin={login} isLoading={isLoading} />;
+    return (
+      <LoginPage
+        loginMode={loginMode}
+        dingtalkConfig={dingtalkConfig}
+        onLogin={startLogin}
+        isLoading={isLoading}
+      />
+    );
   }
 
   return <MainApp user={user} onLogout={logout} theme={theme} toggleTheme={toggleTheme} />;
@@ -102,6 +89,17 @@ function MainApp({ user, onLogout, theme, toggleTheme }) {
 
   const activeConv = conversations.find(c => c.id === activeConvId);
 
+  // 找到最后一条 assistant 消息：追问建议按钮只挂在它下方，避免历史消息被按钮堆满
+  let lastAssistantIdx = -1;
+  if (activeConv) {
+    for (let i = activeConv.messages.length - 1; i >= 0; i--) {
+      if (activeConv.messages[i].role === 'assistant') {
+        lastAssistantIdx = i;
+        break;
+      }
+    }
+  }
+
   const createConversation = () => {
     setActiveConvId(null);
     setInput('');
@@ -124,12 +122,15 @@ function MainApp({ user, onLogout, theme, toggleTheme }) {
     let convId = activeConvId;
     let convMessages = [];
 
+    // 先添加一个空的 assistant 占位，后续流式填充
+    const placeholderMsg = { role: 'assistant', content: '', module: null, cacheHit: false, thinking: '', toolCalls: [] };
+
     if (!convId) {
       convId = `conv-${Date.now()}`;
       const newConv = {
         id: convId,
         title: text.trim().slice(0, 24) + (text.length > 24 ? '...' : ''),
-        messages: [userMessage],
+        messages: [userMessage, placeholderMsg],
         createdAt: new Date().toISOString()
       };
       setConversations(prev => [newConv, ...prev]);
@@ -139,7 +140,7 @@ function MainApp({ user, onLogout, theme, toggleTheme }) {
       setConversations(prev => prev.map(c => {
         if (c.id === convId) {
           convMessages = [...c.messages, userMessage];
-          return { ...c, messages: convMessages };
+          return { ...c, messages: [...convMessages, placeholderMsg] };
         }
         return c;
       }));
@@ -164,30 +165,132 @@ function MainApp({ user, onLogout, theme, toggleTheme }) {
         })
       });
 
-      const data = await res.json();
-
-      if (data.error) {
-        throw new Error(data.error);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${res.status}`);
       }
 
-      const assistantMessage = {
-        role: 'assistant',
-        content: data.reply,
-        module: data.module,
-        cacheHit: data.cacheHit
-      };
+      const contentType = res.headers.get('content-type') || '';
+      let streamedContent = '';
+      let meta = { module: null, cacheHit: false };
+      let suggestions = [];
+      let thinkingText = '';
+      let toolCallsAcc = [];
 
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        streamedContent = data.reply || '';
+        meta = { module: data.module, cacheHit: data.cacheHit };
+        suggestions = data.suggestions || [];
+      } else {
+        // SSE 流模式
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const dataStr = line.slice(6).trim();
+            if (!dataStr) continue;
+
+            try {
+              const event = JSON.parse(dataStr);
+              if (event.type === 'meta') {
+                meta = { module: event.module, cacheHit: event.cacheHit };
+              } else if (event.type === 'token') {
+                if (!streamedContent) setLoading(false);
+                streamedContent += event.text;
+                setConversations(prev => prev.map(c => {
+                  if (c.id === convId) {
+                    const msgs = [...c.messages];
+                    msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], content: streamedContent };
+                    return { ...c, messages: msgs };
+                  }
+                  return c;
+                }));
+              } else if (event.type === 'thinking') {
+                thinkingText += event.text || '';
+                setConversations(prev => prev.map(c => {
+                  if (c.id === convId) {
+                    const msgs = [...c.messages];
+                    msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], thinking: thinkingText };
+                    return { ...c, messages: msgs };
+                  }
+                  return c;
+                }));
+              } else if (event.type === 'tool_call') {
+                const tc = { name: event.name, input: event.input || {}, result: null };
+                toolCallsAcc.push(tc);
+                if (!streamedContent) setLoading(false);
+                setConversations(prev => prev.map(c => {
+                  if (c.id === convId) {
+                    const msgs = [...c.messages];
+                    msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], toolCalls: [...toolCallsAcc] };
+                    return { ...c, messages: msgs };
+                  }
+                  return c;
+                }));
+              } else if (event.type === 'tool_result') {
+                const last = toolCallsAcc[toolCallsAcc.length - 1];
+                if (last) last.result = event.summary || event.error || '';
+                setConversations(prev => prev.map(c => {
+                  if (c.id === convId) {
+                    const msgs = [...c.messages];
+                    msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], toolCalls: [...toolCallsAcc] };
+                    return { ...c, messages: msgs };
+                  }
+                  return c;
+                }));
+              } else if (event.type === 'done') {
+                if (!streamedContent) streamedContent = event.reply || '';
+                if (Array.isArray(event.suggestions)) suggestions = event.suggestions;
+              } else if (event.type === 'error') {
+                throw new Error(event.error || 'AI 调用失败');
+              }
+            } catch {}
+          }
+        }
+      }
+      if (!streamedContent) {
+        streamedContent = 'AI 未能生成回复，请重试。';
+      }
       setConversations(prev => prev.map(c => {
         if (c.id === convId) {
-          return { ...c, messages: [...c.messages, assistantMessage] };
+          const msgs = [...c.messages];
+          msgs[msgs.length - 1] = {
+            role: 'assistant',
+            content: streamedContent,
+            module: meta.module,
+            cacheHit: meta.cacheHit,
+            suggestions,
+            thinking: thinkingText,
+            toolCalls: toolCallsAcc
+          };
+          return { ...c, messages: msgs };
         }
         return c;
       }));
     } catch (e) {
-      message.error(`发送失败: ${e.message}`);
+      alert(`发送失败: ${e.message}`);
       setConversations(prev => prev.map(c => {
         if (c.id === convId) {
-          return { ...c, messages: c.messages.slice(0, -1) };
+          const msgs = [...c.messages];
+          if (msgs.length >= 2 && msgs[msgs.length - 1].role === 'assistant' && !msgs[msgs.length - 1].content) {
+            msgs.pop();
+          }
+          if (msgs.length >= 1 && msgs[msgs.length - 1].role === 'user' && msgs[msgs.length - 1].content === text.trim()) {
+            msgs.pop();
+          }
+          return { ...c, messages: msgs };
         }
         return c;
       }));
@@ -279,7 +382,7 @@ function MainApp({ user, onLogout, theme, toggleTheme }) {
                 {Icons.user}
                 <div className="user-details">
                   <span className="user-name">{user.userName}</span>
-                  <span className="user-org">{user.orgName || '合肥一六八玫瑰园学校东校'}</span>
+                  <span className="user-org">{user.orgName || ''}</span>
                 </div>
                 <span className="user-role">{user.role}</span>
               </div>
@@ -363,12 +466,36 @@ function MainApp({ user, onLogout, theme, toggleTheme }) {
                       {msg.role === 'assistant' && (
                         <div className="message-avatar">{Icons.robot}</div>
                       )}
-                      <div className="message-bubble">
-                        <MessageContent content={msg.content} />
-                        {msg.cacheHit && (
-                          <div className="cache-badge">
-                            <span className="cache-dot" />
-                            {t('app.chat.cacheBadge', { module: MODULE_NAMES[msg.module] || t('app.chat.cacheBadgeDefault') })}
+                      <div className="message-body">
+                        {/* 思考内容（可折叠） */}
+                        {msg.thinking && (
+                          <ThinkingBlock text={msg.thinking} />
+                        )}
+                        {/* 工具调用链（可折叠） */}
+                        {msg.toolCalls?.length > 0 && (
+                          <ToolCallsPanel calls={msg.toolCalls} />
+                        )}
+                        <div className="message-bubble">
+                          <MessageContent content={msg.content} />
+                          {msg.cacheHit && (
+                            <div className="cache-badge">
+                              <span className="cache-dot" />
+                              {t('app.chat.cacheBadge', { module: MODULE_NAMES[msg.module] || t('app.chat.cacheBadgeDefault') })}
+                            </div>
+                          )}
+                        </div>
+                        {idx === lastAssistantIdx && msg.role === 'assistant' && !loading && msg.suggestions?.length > 0 && (
+                          <div className="suggestion-chips">
+                            {msg.suggestions.map((q, qi) => (
+                              <button
+                                key={qi}
+                                className="suggestion-chip"
+                                onClick={() => sendMessage(q)}
+                                title={q}
+                              >
+                                {q}
+                              </button>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -419,7 +546,6 @@ function MainApp({ user, onLogout, theme, toggleTheme }) {
   );
 }
 
-// ==================== 消息内容渲染（支持 mermaid）====================
 function MessageContent({ content }) {
   const parts = content.split(/```mermaid([\s\S]*?)```/);
 
@@ -454,7 +580,7 @@ function TextBlock({ content }) {
               </tr>
             </thead>
             <tbody>
-              {tableRows.slice(2).map((row, ri) => (
+              {tableRows.slice(1).map((row, ri) => (
                 <tr key={ri}>
                   {row.map((cell, ci) => (
                     <td key={ci}>{renderInline(cell.trim())}</td>
@@ -489,9 +615,9 @@ function TextBlock({ content }) {
     }
 
     if (line.startsWith('## ')) {
-      elements.push(<h2 className="content-h2" key={idx}>{renderInline(line.slice(3))}</h2>);
+      elements.push(<h2 key={idx}>{renderInline(line.slice(3))}</h2>);
     } else if (line.startsWith('### ')) {
-      elements.push(<h3 className="content-h3" key={idx}>{renderInline(line.slice(4))}</h3>);
+      elements.push(<h3 key={idx}>{renderInline(line.slice(4))}</h3>);
     } else if (line.trim().startsWith('- ')) {
       const text = line.trim().slice(2);
       elements.push(
@@ -509,7 +635,7 @@ function TextBlock({ content }) {
         </div>
       );
     } else if (line.trim()) {
-      elements.push(<p className="content-p" key={idx}>{renderInline(line)}</p>);
+      elements.push(<p key={idx}>{renderInline(line)}</p>);
     }
   });
 
@@ -530,4 +656,48 @@ function renderInline(text) {
     }
     return part;
   });
+}
+
+// ==================== 思考内容（可折叠） ====================
+
+function ThinkingBlock({ text }) {
+  const [open, setOpen] = useState(false);
+  if (!text) return null;
+  return (
+    <div className="thinking-block">
+      <button className="thinking-toggle" onClick={() => setOpen(!open)}>
+        <span className="thinking-toggle-icon">{open ? '▼' : '▶'}</span>
+        <span>思考过程</span>
+      </button>
+      {open && <pre className="thinking-content">{text}</pre>}
+    </div>
+  );
+}
+
+// ==================== 工具调用链（可折叠） ====================
+
+function ToolCallsPanel({ calls }) {
+  const [open, setOpen] = useState(false);
+  if (!calls?.length) return null;
+  return (
+    <div className="tool-calls-panel">
+      <button className="tool-calls-toggle" onClick={() => setOpen(!open)}>
+        <span className="tool-calls-toggle-icon">{open ? '▼' : '▶'}</span>
+        <span>🔧 工具调用（{calls.length} 次）</span>
+      </button>
+      {open && (
+        <div className="tool-calls-list">
+          {calls.map((tc, i) => (
+            <div key={i} className="tool-call-item">
+              <div className="tool-call-name">📂 {tc.name}</div>
+              <div className="tool-call-input">{typeof tc.input === 'object' ? JSON.stringify(tc.input) : tc.input}</div>
+              {tc.result != null && (
+                <div className="tool-call-result">{tc.result}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }

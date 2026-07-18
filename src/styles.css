@@ -578,6 +578,18 @@ body {
   height: 20px;
 }
 
+.message-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+}
+
+.message.user .message-body {
+  align-items: flex-end;
+}
+
 .message-bubble {
   max-width: 80%;
   padding: 14px 18px;
@@ -650,6 +662,39 @@ body {
   background: var(--md-sys-color-success);
 }
 
+/* 追问建议快捷按钮（仅挂在最后一条 AI 回答下方） */
+.suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  max-width: 100%;
+  animation: fadeIn 0.3s ease;
+}
+
+.suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-full);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 13px;
+  font-family: var(--md-sys-typescale-font);
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  text-align: left;
+}
+
+.suggestion-chip:hover {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  border-color: var(--md-sys-color-primary);
+  box-shadow: var(--md-sys-elevation-1);
+}
+
 /* 聊天输入区 */
 .chat-input-area {
   border-top: 1px solid var(--md-sys-color-outline-variant);
@@ -666,25 +711,25 @@ body {
   color: inherit;
 }
 
-.content-h2 {
+.message-content h2 {
   font-size: 16px;
   font-weight: 500;
   margin: 16px 0 8px;
   color: var(--md-sys-color-on-surface);
 }
 
-.content-h3 {
+.message-content h3 {
   font-size: 14px;
   font-weight: 500;
   margin: 12px 0 6px;
   color: var(--md-sys-color-primary);
 }
 
-.content-p {
+.message-content p {
   margin: 6px 0;
 }
 
-.list-item {
+.message-content .message-content .list-item {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -692,7 +737,7 @@ body {
   padding-left: 4px;
 }
 
-.list-bullet {
+.message-content .list-bullet {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -701,7 +746,7 @@ body {
   flex-shrink: 0;
 }
 
-.list-number {
+.message-content .list-number {
   color: var(--md-sys-color-primary);
   font-weight: 500;
   min-width: 20px;
@@ -721,7 +766,7 @@ body {
 }
 
 /* 表格 */
-.table-wrapper {
+.message-content .table-wrapper {
   overflow-x: auto;
   margin: 12px 0;
   border-radius: var(--md-sys-shape-corner-sm);
@@ -770,6 +815,15 @@ body {
   margin: 0 auto;
 }
 
+/* Mermaid 主题隔离：根据全局主题调整 SVG 文字色 */
+[data-theme="light"] .mermaid-container svg text {
+  fill: #1a1c1e;
+}
+
+[data-theme="dark"] .mermaid-container svg text {
+  fill: #e3e2e6;
+}
+
 .mermaid-container.error pre {
   color: var(--md-sys-color-error);
   font-family: 'Roboto Mono', monospace;
@@ -796,16 +850,95 @@ body {
   background: var(--md-sys-color-outline);
 }
 
-/* ==================== Ant Design 覆盖 ==================== */
-.ant-message {
-  font-family: var(--md-sys-typescale-font);
+/* ==================== 思考内容（可折叠） ==================== */
+
+.thinking-block {
+  margin-bottom: 10px;
 }
 
-.ant-message-notice-content {
-  background: var(--md-sys-color-surface-container-high) !important;
-  color: var(--md-sys-color-on-surface) !important;
-  border-radius: var(--md-sys-shape-corner-md) !important;
-  box-shadow: var(--md-sys-elevation-2) !important;
+.thinking-toggle,
+.tool-calls-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--md-sys-color-surface-container-low);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-full);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 12px;
+  font-family: var(--md-sys-typescale-font);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  margin-bottom: 6px;
+}
+
+.thinking-toggle:hover,
+.tool-calls-toggle:hover {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.thinking-toggle-icon,
+.tool-calls-toggle-icon {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.thinking-content {
+  margin: 6px 0 0 0;
+  padding: 10px 12px;
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-sm);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* ==================== 工具调用链（可折叠） ==================== */
+
+.tool-calls-panel {
+  margin-bottom: 10px;
+}
+
+.tool-calls-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tool-call-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-sm);
+  font-size: 12px;
+}
+
+.tool-call-name {
+  font-weight: 500;
+  color: var(--md-sys-color-primary);
+}
+
+.tool-call-input {
+  color: var(--md-sys-color-on-surface-variant);
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  word-break: break-all;
+  opacity: 0.8;
+}
+
+.tool-call-result {
+  color: var(--md-sys-color-on-surface);
+  font-size: 12px;
 }
 
 /* ==================== 响应式 ==================== */

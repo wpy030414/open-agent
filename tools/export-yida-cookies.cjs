@@ -50,8 +50,8 @@ const path = require('path');
     }))
   };
 
-  // 保存到项目目录
-  const outputPath = path.join(__dirname, '.cache', 'cookies-public.json');
+  // 保存到项目根目录的 .cache/（脚本在 tools/ 子目录，需往上跳一级）
+  const outputPath = path.join(__dirname, '..', '.cache', 'cookies-public.json');
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, JSON.stringify(cookiesData, null, 2));
   console.log(`\nCookies 已保存到: ${outputPath}`);
