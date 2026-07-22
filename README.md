@@ -1,10 +1,12 @@
 # AI 秘书 Web 原型
 
-> Material Design 3 · 宜搭业务数据 · AI MCP 工具调用 · 钉钉身份识别 · 思考过程可见
+> Material Design 3 · 宜搭业务数据 + 钉钉组织架构/考勤 · AI MCP 工具调用 · DingPass Skill · 钉钉身份识别 · 思考过程可见
 
 ## 功能特性
 
 - **MCP 式工具调用**：AI 模型自主决定何时调用宜搭数据工具（4 个 tools），实时查询、按需获取，不再被 prompt 里 5 条死数据限制
+- **DingPass 钉钉技能包**：基于钉钉真实 API 的组织架构和考勤管理，提供部门查询、员工信息、打卡记录、考勤统计等功能
+- **Skill 自动发现**：`src/skill-manager.js` 自动扫描并加载 `docs/` 下的 skills，支持动态扩展
 - **思考过程可见**：模型推理链（thinking）流式展示，可折叠查看
 - **Material Design 3 (MD3)** 设计语言，自适应明暗主题
 - **双模式登录**：开发环境本机免密（读宜搭 cookies）/ 生产环境钉钉标准 OAuth
@@ -47,6 +49,10 @@ LOGIN_MODE=local                             # local=本机免密 / dingtalk=钉
 DINGTALK_CLIENT_ID=
 DINGTALK_CLIENT_SECRET=
 DINGTALK_REDIRECT_URI=http://localhost:5173/callback
+
+# ===== DingPass 钉钉技能包 =====
+# DingPass 需要以下三个凭证（从钉钉开放平台获取）
+DINGTALK_AGENT_ID=                           # 钉钉应用 AgentId
 ```
 
 ### 登录说明
@@ -88,7 +94,9 @@ DINGTALK_REDIRECT_URI=http://localhost:5173/callback
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## MCP 工具清单（4 个）
+## MCP 工具清单（4 个 + DingPass 4 个）
+
+### 宜搭工具
 
 | 工具名 | 参数 | 用途 |
 |---|---|---|
@@ -99,6 +107,17 @@ DINGTALK_REDIRECT_URI=http://localhost:5173/callback
 
 > 工具全部实现在 `server/yida-client.mjs` 的 `executeTool()` 函数，直接调宜搭内部 HTTP API，**不依赖 OpenYida CLI/Skill**。
 
+### DingPass 钉钉工具（需要配置钉钉凭证）
+
+| 工具名 | 参数 | 用途 |
+|---|---|---|
+| `dingpass_organization_list_departments` | `parent_id, fetch_child?` | 查询组织架构部门列表 |
+| `dingpass_organization_get_employee` | `userid` | 查询员工详细信息 |
+| `dingpass_attendance_get_checkin_records` | `userid_list, check_date_from, check_date_to` | 查询打卡记录 |
+| `dingpass_attendance_get_stats` | `userid, month` | 查询考勤统计 |
+
+> DingPass 基于钉钉真实 API 实现，需要配置 `DINGTALK_CLIENT_ID`、`DINGTALK_CLIENT_SECRET`、`DINGTALK_AGENT_ID`。详见 [docs/dingpass/README.md](docs/dingpass/README.md)。
+
 ## 项目结构
 
 ```
@@ -108,7 +127,7 @@ yida-agent/
 ├── index.html                 # 入口 HTML
 ├── .env                       # 环境变量（gitignored）
 ├── server/
-│   ├── index.mjs              # 后端路由 + 登录 + /api/chat tool_use 循环（~500 行）
+│   ├── index.mjs              # 后端路由 + 登录 + /api/chat tool_use 循环 + Skill API（~600 行）
 │   └── yida-client.mjs        # 宜搭 HTTP 客户端 + MCP 工具执行 + 元数据缓存（~210 行）
 ├── src/
 │   ├── main.jsx               # React 入口
@@ -117,10 +136,17 @@ yida-agent/
 │   ├── icons.jsx              # SVG 图标
 │   ├── styles.css             # MD3 令牌 + 全局样式（含思考/工具调用折叠块）
 │   ├── hooks/useAuth.js       # 双模式认证 Hook
-│   └── components/
-│       ├── LoginPage.jsx      # 登录页
-│       ├── CallbackPage.jsx   # 钉钉 OAuth 回调
-│       └── MermaidChart.jsx   # Mermaid 图表渲染
+│   ├── skill-manager.js       # Skill 自动发现和管理
+│   ├── components/            # LoginPage / CallbackPage / MermaidChart
+│   └── dingpass/              # DingPass 钉钉技能包实现
+│       ├── index.js           # 主入口
+│       ├── dingtalk-client.js # 钉钉 API 客户端
+│       ├── organization.js    # 组织架构模块
+│       └── attendance.js      # 考勤管理模块
+├── docs/
+│   └── dingpass/              # DingPass 文档
+│       ├── SKILL.md           # Skill 规范
+│       └── README.md          # 使用说明
 └── tools/                     # 开发辅助
     ├── export-yida-cookies.cjs
     ├── discover-apps.cjs
@@ -139,6 +165,8 @@ yida-agent/
 | GET | `/api/cache` | 全部模块元数据索引 |
 | GET | `/api/cache/:module` | 指定模块元数据 |
 | POST | `/api/cache/refresh` | 手动刷新模块索引 |
+| **GET** | **`/api/skills`** | **列出所有可用的 skills** |
+| **POST** | **`/api/skill/call`** | **调用指定 skill（如 dingpass）** |
 
 ### SSE 事件类型
 
@@ -174,3 +202,4 @@ open tools/export-cookies.html       # 浏览器手动导出（备选）
 2. 钉钉 JSAPI 扫码登录（替代整页跳转）
 3. 支持多语言（i18n.js 扩展）
 4. MCP 工具扩展：数据写入（create/update）、审批操作
+5. **DingPass Skill 扩展**：添加更多钉钉业务模块（审批流程、通讯录同步、智能表格等）

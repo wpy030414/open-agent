@@ -3,16 +3,18 @@
 ## 项目概述
 
 **AI 秘书**：宜搭低代码平台 + AI 大模型的企业数据分析助手。
-核心差异化：AI 通过 **Anthropic tool_use 协议**自主调用 4 个宜搭数据工具，实时查询、按需获取，不依赖 prompt 注入死数据。
+核心差异化：AI 通过 **Anthropic tool_use 协议**自主调用 4 个宜搭数据工具 + **DingPass 钉钉技能包**，实时查询、按需获取，不依赖 prompt 注入死数据。
 
 ## 技术栈速查
 
 | 层 | 技术 | 关键文件 |
 |---|---|---|
 | 前端 | React 18 + Vite + MD3 CSS 令牌 | `src/App.jsx` |
-| 后端 | Express（路由/AI 问答/登录） | `server/index.mjs` |
+| 后端 | Express（路由/AI 问答/登录/Skill 管理） | `server/index.mjs` |
 | AI | DeepSeek v4（Anthropic 兼容 `/v1/messages` + tool_use + stream） | `server/index.mjs:/api/chat` |
 | 数据 | 宜搭 HTTP API（自建 YidaAPI 类，不依赖 OpenYida） | `server/yida-client.mjs` |
+| 钉钉集成 | DingPass Skill（组织架构 + 考勤管理） | `src/dingpass/` |
+| Skill 管理 | 自动发现和管理技能包 | `src/skill-manager.js` |
 | 登录 | 双模式：本机 cookies / 钉钉 OAuth | `src/hooks/useAuth.js` |
 
 ## 启动
@@ -70,6 +72,31 @@ stop_reason:
 
 所有工具直接调宜搭内部 HTTP API（`YidaAPI` 类），**零 OpenYida 依赖**。
 
+### DingPass 钉钉技能包（`src/dingpass/`）
+
+DingPass 提供钉钉组织架构和考勤管理的真实 API 接口，任何 Agent 都可以通过标准化调用方式使用喵～
+
+**核心模块：**
+- **organization**：部门管理、员工查询
+  - `list_departments` - 列出部门
+  - `get_employee` - 获取员工信息
+  - `search_employee` - 搜索员工
+- **attendance**：打卡记录、请假、加班
+  - `get_checkin_records` - 查询打卡记录
+  - `submit_leave` - 提交请假
+  - `get_attendance_stats` - 考勤统计
+
+**AI 可调用的 DingPass tools：**
+- `dingpass_organization_list_departments` - 查询组织架构
+- `dingpass_organization_get_employee` - 查询员工详情
+- `dingpass_attendance_get_checkin_records` - 查询打卡记录
+- `dingpass_attendance_get_stats` - 查询考勤统计
+
+**Skill 管理（`src/skill-manager.js`）：**
+- 自动扫描 `docs/` 目录下的 SKILL.md 文件
+- 提供 `/api/skills` 端点列出所有可用 skills
+- 提供 `/api/skill/call` 端点调用指定 skill
+
 ### 模块元数据缓存（`server/yida-client.mjs:buildModuleIndex`）
 - 启动 + 每 6h：`getApps()` → `getForms()`，只存 **formUuid/formName/appType/formType**，不拉 record
 - 写入 `CACHE.modules` → system prompt 里列出，供模型导航
@@ -98,9 +125,10 @@ stop_reason:
 | `AI_MODEL` | `deepseek-v4-pro` | 模型名称 |
 | `AI_THINKING_BUDGET` | `0` | 模型 extended thinking token 预算（0=关闭） |
 | `LOGIN_MODE` | `dingtalk` | `local` / `dingtalk` |
-| `DINGTALK_CLIENT_ID` | — | 钉钉 AppKey |
+| `DINGTALK_CLIENT_ID` | — | 钉钉 AppKey（钉钉 OAuth + DingPass 都需要） |
 | `DINGTALK_CLIENT_SECRET` | — | 钉钉 AppSecret |
 | `DINGTALK_REDIRECT_URI` | `http://localhost:5173/callback` | 回调地址 |
+| `DINGTALK_AGENT_ID` | — | 钉钉应用 AgentId（DingPass 需要） |
 | `PORT` | `3001` | 后端监听端口 |
 
 ## 目录细节
@@ -109,7 +137,7 @@ stop_reason:
 yida-agent/
 ├── start.mjs             # 一键全栈（装依赖 + 检查 Key + spawn 前后端）
 ├── server/
-│   ├── index.mjs          # 路由 + 登录 + /api/chat tool_use 循环（~500 行）
+│   ├── index.mjs          # 路由 + 登录 + /api/chat tool_use 循环 + Skill API（~600 行）
 │   └── yida-client.mjs    # YidaAPI HTTP 客户端 + executeTool + 元数据缓存（~210 行）
 ├── src/
 │   ├── App.jsx           # 对话/首页/thinking/tool_calls/追问按钮渲染
@@ -117,7 +145,17 @@ yida-agent/
 │   ├── icons.jsx         # SVG 图标
 │   ├── styles.css        # MD3 令牌 + 思考/工具调用折叠块样式
 │   ├── hooks/useAuth.js  # 双模式认证
-│   └── components/       # LoginPage / CallbackPage / MermaidChart
+│   ├── skill-manager.js  # Skill 自动发现和管理
+│   ├── components/       # LoginPage / CallbackPage / MermaidChart
+│   └── dingpass/         # DingPass 钉钉技能包实现
+│       ├── index.js           # 主入口
+│       ├── dingtalk-client.js # 钉钉 API 客户端
+│       ├── organization.js    # 组织架构模块
+│       └── attendance.js      # 考勤管理模块
+├── docs/
+│   └── dingpass/         # DingPass 文档
+│       ├── SKILL.md      # Skill 规范
+│       └── README.md     # 使用说明
 ├── tools/                # Playwright cookies 提取 / 应用探测 / 手动导出
 ├── .cache/               # cookies-public.json（gitignored）
 └── .env                  # 环境变量（gitignored）
@@ -126,8 +164,10 @@ yida-agent/
 ## 注意事项
 
 1. **MCP 工具全部自实现**：`YidaAPI` 类 ≈ 100 行 HTTP 封装，`executeTool` ≈ 40 行 switch。不依赖 OpenYida CLI/Skill，服务器只需 `.cache/cookies-public.json`
-2. **cookie 认证**：宜搭 API 走 Cookie + CSRF Token；cookie 过期后钉钉 OAuth 会接管，当前无自动刷新机制
-3. **会话无后端存储**：对话只在 `localStorage`，清缓存即丢
-4. **tool_use 最多 5 轮**：防止死循环，单次回答最多 5 轮工具调用
-5. **追问块实时扣留**：流式 text_delta 在 `server/index.mjs` 层检测 ```` ```suggestions ```` 并扣留，避免前端看到原始标记
-6. **thinking 默认关闭**：`.env` `AI_THINKING_BUDGET=0`，需手动设 >0 开启
+2. **DingPass 钉钉技能包**：基于钉钉真实 API 实现，需要配置 `DINGTALK_CLIENT_ID`、`DINGTALK_CLIENT_SECRET`、`DINGTALK_AGENT_ID`。提供组织架构和考勤管理的完整 CRUD 接口
+3. **cookie 认证**：宜搭 API 走 Cookie + CSRF Token；cookie 过期后钉钉 OAuth 会接管，当前无自动刷新机制
+4. **会话无后端存储**：对话只在 `localStorage`，清缓存即丢
+5. **tool_use 最多 5 轮**：防止死循环，单次回答最多 5 轮工具调用
+6. **追问块实时扣留**：流式 text_delta 在 `server/index.mjs` 层检测 ```` ```suggestions ```` 并扣留，避免前端看到原始标记
+7. **thinking 默认关闭**：`.env` `AI_THINKING_BUDGET=0`，需手动设 >0 开启
+8. **Skill 自动发现**：`src/skill-manager.js` 扫描 `docs/` 下的 SKILL.md，支持动态加载和管理

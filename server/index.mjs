@@ -10,6 +10,9 @@ config();
 // 宜搭数据客户端（cookie 认证 + 应用/表单/数据查询 + 工具执行 + 定时缓存）
 import { yida, CACHE, COOKIES_FILE, startPrecompute, executeTool } from './yida-client.mjs';
 
+// Skill 管理器（自动发现 dingpass 等技能包）
+import { getAvailableSkills, callSkill } from '../src/skill-manager.js';
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -162,6 +165,34 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// ==================== Skill 相关 API ====================
+
+// 列出所有可用的 skills
+app.get('/api/skills', (req, res) => {
+  const skills = getAvailableSkills();
+  res.json({
+    skills,
+    count: skills.length
+  });
+});
+
+// 调用 skill
+app.post('/api/skill/call', async (req, res) => {
+  const { skillName, params } = req.body;
+
+  if (!skillName || !params) {
+    return res.status(400).json({ error: '缺少必需参数: skillName, params' });
+  }
+
+  try {
+    const result = await callSkill(skillName, params);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('Skill 调用失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/cache/:module?', (req, res) => {
   const { module } = req.params;
   if (module) {
@@ -229,6 +260,55 @@ const TOOLS = [
         formUuid: { type: 'string', description: '表单唯一标识' }
       },
       required: ['appType', 'formUuid']
+    }
+  },
+  // ==================== DingPass Skills ====================
+  {
+    name: 'dingpass_organization_list_departments',
+    description: '列出钉钉指定父部门下的所有子部门。用于查询组织架构、部门层级、组织人数等信息。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        parent_id: { type: 'number', description: '父部门ID，根部门为1' },
+        fetch_child: { type: 'boolean', description: '是否递归获取子部门' }
+      },
+      required: ['parent_id']
+    }
+  },
+  {
+    name: 'dingpass_organization_get_employee',
+    description: '获取钉钉员工详细信息。用于查询员工信息、联系方式、所属部门等。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userid: { type: 'string', description: '员工userid' }
+      },
+      required: ['userid']
+    }
+  },
+  {
+    name: 'dingpass_attendance_get_checkin_records',
+    description: '获取钉钉员工打卡记录。用于查询考勤数据、打卡时间、考勤状态等。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userid_list: { type: 'array', items: { type: 'string' }, description: '用户ID列表（最多50个）' },
+        check_date_from: { type: 'string', description: '开始日期 YYYY-MM-DD' },
+        check_date_to: { type: 'string', description: '结束日期 YYYY-MM-DD' }
+      },
+      required: ['userid_list', 'check_date_from', 'check_date_to']
+    }
+  },
+  {
+    name: 'dingpass_attendance_get_stats',
+    description: '获取钉钉考勤统计。用于查询月度考勤汇总、迟到次数、加班时长等统计数据。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userid: { type: 'string', description: '用户ID' },
+        month: { type: 'string', description: '统计月份 YYYY-MM' }
+      },
+      required: ['userid', 'month']
     }
   }
 ];
@@ -359,7 +439,23 @@ app.post('/api/chat', async (req, res) => {
           res.write(`data: ${JSON.stringify({ type: 'tool_call', name: tb.name, input })}\n\n`);
 
           try {
-            const result = await executeTool(tb.name, input);
+            // 处理 dingpass skill 调用
+            let result;
+            if (tb.name.startsWith('dingpass_')) {
+              // 解析 skill 名称和动作
+              const parts = tb.name.replace('dingpass_', '').split('_');
+              const moduleName = parts[0]; // organization | attendance
+              const actionName = parts.slice(1).join('_');
+
+              result = await callSkill('dingpass', {
+                module: moduleName,
+                action: actionName,
+                params: input
+              });
+            } else {
+              result = await executeTool(tb.name, input);
+            }
+
             const resultStr = JSON.stringify(result);
             const summary = calcToolSummary(tb.name, result);
             res.write(`data: ${JSON.stringify({ type: 'tool_result', name: tb.name, summary, total: result.total })}\n\n`);
@@ -428,6 +524,15 @@ function calcToolSummary(name, result) {
     case 'yida_form_list':     return `查到 ${result.total} 个表单`;
     case 'yida_form_data':     return `查到 ${result.count} 条记录（共 ${result.total} 条）`;
     case 'yida_form_schema':   return `返回 ${result.count} 个字段定义`;
+    // DingPass skills
+    case 'dingpass_organization_list_departments':
+      return `查到 ${result.total} 个部门`;
+    case 'dingpass_organization_get_employee':
+      return `获取员工: ${result.employee?.name || '未知'}`;
+    case 'dingpass_attendance_get_checkin_records':
+      return `查到 ${result.total} 条打卡记录`;
+    case 'dingpass_attendance_get_stats':
+      return `考勤统计: 工作${result.stats?.work_days || 0}天，迟到${result.stats?.late_count || 0}次`;
     default:                   return '工具执行完成';
   }
 }
@@ -451,9 +556,17 @@ function buildSystemPrompt(user) {
 
 ## 工作流程（重要）
 1. 理解用户问题，判断需要哪些数据
-2. **主动调用工具**查询宜搭平台获取真实数据——你手上有 yida_app_list / yida_form_list / yida_form_data / yida_form_schema 四个工具
+2. **主动调用工具**查询宜搭平台或钉钉 API 获取真实数据——你手上有 yida_app_list / yida_form_list / yida_form_data / yida_form_schema 四个宜搭工具，以及 dingpass_* 系列钉钉工具
 3. 工具返回真实数据后，基于实际数据进行分析和回答——**绝不要猜测、编造或假设不存在的数据**
 4. 引用数据时指明来源表单和条数
+
+## 可用工具
+- **宜搭工具**: yida_app_list, yida_form_list, yida_form_data, yida_form_schema
+- **钉钉工具 (DingPass)**:
+  - `dingpass_organization_list_departments` - 查询组织架构部门列表
+  - `dingpass_organization_get_employee` - 查询员工详细信息
+  - `dingpass_attendance_get_checkin_records` - 查询打卡记录
+  - `dingpass_attendance_get_stats` - 查询考勤统计
 
 ## 对话规则
 - 对话历史在 messages 中完整保留，指代词如"这两条""继续分析""详细说说"要从历史中找到上一轮提到的具体记录
