@@ -1,5 +1,5 @@
 {
-  "name": "ai-secretary-prototype",
+  "name": "yida-agent",
   "version": "1.0.0",
   "description": "AI 秘书 Web 原型 - 钉钉身份识别 + 宜搭数据 + Claude 智能问答",
   "type": "module",
@@ -9,19 +9,20 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@material/material-color-utilities": "^0.3.0",
+    "@material/web": "^2.3.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^4.19.2",
     "mermaid": "^11.16.0",
     "playwright": "^1.61.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "vue": "^3.5.13"
   },
   "optionalDependencies": {
     "crypto": "^1.0.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
+    "@vitejs/plugin-vue": "^5.2.1",
     "vite": "^5.3.1"
   }
 }
