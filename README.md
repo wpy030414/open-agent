@@ -1,14 +1,15 @@
 # AI 秘书 Web 原型
 
-> Material Design 3 · 宜搭业务数据 + 钉钉组织架构/考勤 · AI MCP 工具调用 · DingPass Skill · 钉钉身份识别 · 思考过程可见
+> Material Design 3 (Material You) · Vue 3 + MWC · 宜搭业务数据 + 钉钉组织架构/考勤 · AI function calling 工具调用 · DingPass Skill · 钉钉身份识别 · 思考过程可见
 
 ## 功能特性
 
-- **MCP 式工具调用**：AI 模型自主决定何时调用宜搭数据工具（4 个 tools），实时查询、按需获取，不再被 prompt 里 5 条死数据限制
+- **Function calling 工具调用**：AI 模型自主决定何时调用宜搭数据工具（4 个 tools）+ DingPass 钉钉工具（4 个 tools），实时查询、按需获取，不再被 prompt 里 5 条死数据限制
 - **DingPass 钉钉技能包**：基于钉钉真实 API 的组织架构和考勤管理，提供部门查询、员工信息、打卡记录、考勤统计等功能
 - **Skill 自动发现**：`src/skill-manager.js` 自动扫描并加载 `docs/` 下的 skills，支持动态扩展
 - **思考过程可见**：模型推理链（thinking）流式展示，可折叠查看
-- **Material Design 3 (MD3)** 设计语言，自适应明暗主题
+- **Material You 动态配色**：基于 HCT 色彩系统从种子色生成完整 M3 色阶，用户可在侧边栏底部换色（6 个内置色板 + 自定义取色器），换色后所有 MWC 组件全量重染
+- **MWC 组件**：采用 Google 官方 @material/web 组件（md-button/md-icon/md-list/md-text-field 等），内置状态层、ripple、expressive 形状
 - **双模式登录**：开发环境本机免密（读宜搭 cookies）/ 生产环境钉钉标准 OAuth
 - **对话管理**：侧边栏新建/切换/删除对话（localStorage 持久化）
 - **追问建议**：每次回答自动生成 3 个相关快捷提问按钮
@@ -33,17 +34,20 @@ node start.mjs     # 带自动装依赖 + API Key 检查
 在项目根目录 `.env`（已 gitignore）中配置：
 
 ```bash
-# ===== AI 模型 =====
-ANTHROPIC_BASE_URL=http://127.0.0.1:15721   # Anthropic 兼容 API 地址
-ANTHROPIC_AUTH_TOKEN=PROXY_MANAGED           # API 认证令牌
-AI_MODEL=deepseek-v4-pro                     # 模型名称
+# ===== AI 模型（OpenAI 兼容 API） =====
+OPENAI_BASE_URL=https://api.openai.com/v1     # OpenAI 兼容 API 地址
+OPENAI_API_KEY=sk-...                          # API 密钥（Bearer token）
+OPENAI_MODEL=gpt-4o                            # 模型名称
 
 # ===== 思考过程（可选） =====
-# 设 >0 开启模型 extended thinking，token 预算建议 2000-4000
+# 设 >0 开启模型 reasoning_effort=high（需模型支持）
 AI_THINKING_BUDGET=0
 
 # ===== 登录方式 =====
-LOGIN_MODE=local                             # local=本机免密 / dingtalk=钉钉 OAuth
+# ENV=dev 时完全免登：跳过登录页，自动使用内置 dev 用户（无需 cookies / 钉钉 OAuth），仅用于开发调试
+ENV=
+# ENV 留空时按 LOGIN_MODE 走正式登录：local=本机免密 / dingtalk=钉钉 OAuth
+LOGIN_MODE=local
 
 # 钉钉登录凭证（仅 LOGIN_MODE=dingtalk 时必填）
 DINGTALK_CLIENT_ID=
@@ -59,6 +63,7 @@ DINGTALK_AGENT_ID=                           # 钉钉应用 AgentId
 
 | 模式 | 触发条件 | 流程 |
 |---|---|---|
+| **dev 免登** | `ENV=dev` | `/api/auth/config` 返回 env=dev → 前端自动调 `/api/whoami` 拿内置 dev 用户 → 直接进主界面（无需 cookies / OAuth） |
 | **本机免密** | `LOGIN_MODE=local` | 读取 `.cache/cookies-public.json` → `/api/whoami` 拿身份 |
 | **钉钉标准** | `LOGIN_MODE=dingtalk` | 跳转钉钉授权页 → code 回跳 → `/api/auth/dingtalk/callback` 换身份 |
 
@@ -73,14 +78,14 @@ DINGTALK_AGENT_ID=                           # 钉钉应用 AgentId
 │  ① 身份识别                                                      │
 │     本机免密 / 钉钉 OAuth → 拿到 userName / role / dept           │
 ├──────────────────────────────────────────────────────────────────┤
-│  ② AI MCP 工具调用循环（server/index.mjs:/api/chat）               │
-│     POST {ANTHROPIC_BASE_URL}/v1/messages                        │
-│       带 system prompt（角色+模块元数据索引+4 个 tool schema）      │
-│     ┌─ stop_reason: "tool_use"                                   │
-│     │  → executeTool("yida_form_data", {appType, formUuid, …})   │
-│     │  → server/yida-client.mjs 实时调宜搭 API                     │
-│     │  → 结果 JSON 注回对话 → 模型继续推理                          │
-│     └─ stop_reason: "end_turn" → 最终回答                          │
+│  ② AI function calling 工具调用循环（server/index.mjs:/api/chat）               │
+│     POST {OPENAI_BASE_URL}/chat/completions                                     │
+│       带 system prompt（角色+模块元数据索引+8 个 function schema）                │
+│     ┌─ finish_reason: "tool_calls"                                              │
+│     │  → executeTool("yida_form_data", {appType, formUuid, …})                 │
+│     │  → server/yida-client.mjs 实时调宜搭 API                                   │
+│     │  → 结果 JSON 注回对话 → 模型继续推理                                       │
+│     └─ finish_reason: "stop" → 最终回答                                          │
 ├──────────────────────────────────────────────────────────────────┤
 │  ③ AI 回答（SSE 流式）                                            │
 │     token 事件 → 前端实时渲染                                      │
@@ -94,7 +99,7 @@ DINGTALK_AGENT_ID=                           # 钉钉应用 AgentId
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## MCP 工具清单（4 个 + DingPass 4 个）
+## Function calling 工具清单（4 个宜搭 + 4 个 DingPass）
 
 ### 宜搭工具
 
@@ -127,17 +132,24 @@ yida-agent/
 ├── index.html                 # 入口 HTML
 ├── .env                       # 环境变量（gitignored）
 ├── server/
-│   ├── index.mjs              # 后端路由 + 登录 + /api/chat tool_use 循环 + Skill API（~600 行）
-│   └── yida-client.mjs        # 宜搭 HTTP 客户端 + MCP 工具执行 + 元数据缓存（~210 行）
+│   ├── index.mjs              # 后端路由 + 登录 + /api/chat function calling 循环 + Skill API（~600 行）
+│   └── yida-client.mjs        # 宜搭 HTTP 客户端 + function calling 工具执行 + 元数据缓存（~210 行）
 ├── src/
-│   ├── main.jsx               # React 入口
-│   ├── App.jsx                # 对话/首页/追问按钮/thinking/tool_calls 渲染
+│   ├── main.js               # Vue 入口（createApp + MWC 注册 + 动态配色）
+│   ├── App.vue                # 根路由（登录/回调/主界面）
+│   ├── md.js                  # MWC 组件批量注册
 │   ├── i18n.js                # 白标化文案
-│   ├── icons.jsx              # SVG 图标
-│   ├── styles.css             # MD3 令牌 + 全局样式（含思考/工具调用折叠块）
-│   ├── hooks/useAuth.js       # 双模式认证 Hook
 │   ├── skill-manager.js       # Skill 自动发现和管理
-│   ├── components/            # LoginPage / CallbackPage / MermaidChart
+│   ├── composables/
+│   │   ├── useTheme.js        # Material You 动态配色（HCT → Scheme → --md-sys-color-*）
+│   │   ├── useAuth.js         # 双模式认证
+│   │   └── useChat.js         # SSE 流式对话
+│   ├── utils/
+│   │   └── markdown.js        # 轻量 markdown 渲染（h()/renderInline）
+│   ├── components/            # *.vue SFC 组件群
+│   ├── styles/
+│   │   ├── tokens.css         # 静态令牌（形状/阴影/字体/布局）
+│   │   └── app.css            # 组件样式
 │   └── dingpass/              # DingPass 钉钉技能包实现
 │       ├── index.js           # 主入口
 │       ├── dingtalk-client.js # 钉钉 API 客户端
@@ -182,9 +194,9 @@ yida-agent/
 
 ## 技术栈
 
-- **前端**：React 18 + Vite + MD3 CSS 令牌 + Mermaid
+- **前端**：Vue 3 + Vite + @material/web (MWC) + @material/material-color-utilities (Material You 动态配色) + Material Symbols + Mermaid
 - **后端**：Express + Node.js 原生 fetch
-- **AI 协议**：Anthropic `/v1/messages`（tool_use + stream + thinking），代理兼容
+- **AI 协议**：OpenAI `/v1/chat/completions`（function calling + stream），兼容各类 OpenAI 风格服务端（DeepSeek、vLLM、OpenRouter 等）
 - **数据源**：宜搭内部 HTTP API（自建 YidaAPI 类，不依赖 OpenYida）
 - **部署**：只需 `.env` + `.cache/cookies-public.json`，`npm run serve` 即跑
 
@@ -198,8 +210,8 @@ open tools/export-cookies.html       # 浏览器手动导出（备选）
 
 ## 后续扩展
 
-1. tool_use 结果增加聚合/统计（count/groupBy），减少模型多轮调用
+1. function calling 结果增加聚合/统计（count/groupBy），减少模型多轮调用
 2. 钉钉 JSAPI 扫码登录（替代整页跳转）
 3. 支持多语言（i18n.js 扩展）
-4. MCP 工具扩展：数据写入（create/update）、审批操作
+4. function calling 工具扩展：数据写入（create/update）、审批操作
 5. **DingPass Skill 扩展**：添加更多钉钉业务模块（审批流程、通讯录同步、智能表格等）
