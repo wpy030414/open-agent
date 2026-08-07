@@ -311,11 +311,17 @@ export async function executeTool(name, input = {}) {
         ...r,
         _summary: summarizeRecord(r, formType)
       }));
+      const totalCount = raw?.content?.totalCount || raw?.totalCount || 0;
+      // 空数据时给 AI 明确信号，杜绝「0 条却编造记录」的幻觉
+      const empty = records.length === 0;
       return {
         records,
         count: records.length,
-        total: raw?.content?.totalCount || raw?.totalCount || records.length,
-        page
+        total: totalCount,
+        page,
+        ...(empty ? {
+          note: '该表单当前查询到 0 条记录。可能原因：表单确实无数据 / 当前账号无权限查看 / 筛选条件不匹配。请如实告知用户「未查询到数据」，禁止编造任何记录、人名、金额或日期。'
+        } : {})
       };
     }
 
