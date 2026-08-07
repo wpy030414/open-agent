@@ -76,9 +76,25 @@ class YidaAPI {
     return !!(this.baseUrl && this.userId);
   }
 
+  // 读取 token 文件的 expires_at（ms），判断 access_token 是否已过期
+  isTokenExpired() {
+    try {
+      const data = JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf8'));
+      const exp = data.expires_at || data.raw?.expires_at;
+      if (!exp) return false; // 无过期信息，交给业务端 401 兜底
+      return Number(exp) <= Date.now() + 60_000; // 提前 1 分钟判过期
+    } catch { return false; }
+  }
+
   async getAccessToken() {
     if (!openyidaTokenAuth) return null;
     try {
+      // openyida 的 getAccessToken 只在有 access_token 时直接返回、不判过期；
+      // 主动检查 expires_at，过期先 refresh，避免一直用过期 token
+      if (this.isTokenExpired() && openyidaTokenAuth.tokenRefresh) {
+        try { await openyidaTokenAuth.tokenRefresh({ projectRoot: PROJECT_ROOT }); }
+        catch (e) { console.error('[yida-client] tokenRefresh 失败:', e.message); }
+      }
       return await openyidaTokenAuth.getAccessToken({ projectRoot: PROJECT_ROOT });
     } catch (e) {
       console.error('[yida-client] getAccessToken 失败:', e.message);
@@ -86,11 +102,8 @@ class YidaAPI {
     }
   }
 
-  async request(apiPath, options = {}) {
-    if (!this.isAvailable()) throw new Error('宜搭未登录（token 不可用，请先 openyida login）');
-    const token = await this.getAccessToken();
-    if (!token) throw new Error('宜搭 token 获取失败');
-
+  // 单次 fetch（不带重试），返回 { ok, status, json }
+  async _fetchOnce(apiPath, options, token) {
     const url = new URL(apiPath, this.baseUrl);
     const searchParams = new URLSearchParams(options.params || {});
     searchParams.set('_stamp', String(Date.now()));
@@ -99,7 +112,6 @@ class YidaAPI {
     const controller = new AbortController();
     const timeoutMs = options.timeout || 30000;
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
     try {
       const response = await fetch(url.toString(), {
         method: options.method || 'GET',
@@ -114,10 +126,36 @@ class YidaAPI {
         body: options.body,
         signal: controller.signal
       });
-      return response.json();
+      const text = await response.text();
+      let json;
+      try { json = JSON.parse(text); } catch { json = { _rawText: text }; }
+      // 401 或响应体标记 token 失效 → 触发上层 refresh 重试
+      const invalid = response.status === 401 ||
+        json?.status === 'invalid_access_token' ||
+        json?.status === 'access_token_expired';
+      return { invalid, json };
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  async request(apiPath, options = {}) {
+    if (!this.isAvailable()) throw new Error('宜搭未登录（token 不可用，请先 openyida login）');
+    let token = await this.getAccessToken();
+    if (!token) throw new Error('宜搭 token 获取失败');
+
+    let { invalid, json } = await this._fetchOnce(apiPath, options, token);
+    // token 失效 → refresh 后重试一次（对齐 openyida requestWithAutoLogin 语义）
+    if (invalid && openyidaTokenAuth?.tokenRefresh) {
+      try {
+        await openyidaTokenAuth.tokenRefresh({ projectRoot: PROJECT_ROOT });
+        token = await this.getAccessToken();
+        if (token) ({ invalid, json } = await this._fetchOnce(apiPath, options, token));
+      } catch (e) {
+        console.error('[yida-client] 401 重试 refresh 失败:', e.message);
+      }
+    }
+    return json;
   }
 
   async getApps() {
