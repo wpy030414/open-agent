@@ -672,6 +672,15 @@ startPrecompute();
 
 // ==================== 启动 ====================
 
+// ==================== 静态资源 (生产) ====================
+import { fileURLToPath as __url } from "url";
+import { dirname as __dn, join as __jp } from "path";
+const __dist = __jp(__dn(__url(import.meta.url)), "..", "dist");
+if (fs.existsSync(__dist)) {
+  app.use(express.static(__dist));
+  app.get(new RegExp("^(?!/api)"), (req, res) => res.sendFile(__jp(__dist, "index.html")));
+}
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`\nAI 秘书后端已启动: http://localhost:${PORT}`);

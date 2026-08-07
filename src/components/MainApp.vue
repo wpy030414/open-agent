@@ -43,7 +43,7 @@ watch(
   [activeConvId, () => activeConv()?.messages?.length],
   async () => {
     await nextTick();
-    messagesEndRef.value?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.value?.scrollIntoView({ behavior: 'auto', block: 'end' });
   }
 );
 // 流式内容变化也滚动
@@ -51,7 +51,7 @@ watch(
   () => activeConv()?.messages?.at(-1)?.content,
   async () => {
     await nextTick();
-    messagesEndRef.value?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.value?.scrollIntoView({ behavior: 'auto', block: 'end' });
   }
 );
 
