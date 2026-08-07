@@ -24,8 +24,8 @@ if (!existsSync(join(__dirname, 'node_modules'))) {
 }
 
 // 2. API Key 未配置 → 提示
-if (!process.env.ANTHROPIC_AUTH_TOKEN) {
-  console.log('⚠️  未设置 ANTHROPIC_AUTH_TOKEN，AI 问答不可用\n');
+if (!process.env.OPENAI_API_KEY) {
+  console.log('⚠️  未设置 OPENAI_API_KEY，AI 问答不可用\n');
 }
 
 // 3. 启动后端 + 前端

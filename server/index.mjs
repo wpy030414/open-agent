@@ -19,19 +19,37 @@ app.use(express.json());
 
 // ==================== 配置 ====================
 
-const API_BASE = process.env.ANTHROPIC_BASE_URL || 'http://127.0.0.1:15721';
-const API_KEY = process.env.ANTHROPIC_AUTH_TOKEN || '';
-const DEFAULT_MODEL = process.env.AI_MODEL || 'deepseek-v4-pro';
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 
 // 登录方式配置
+const ENV = (process.env.ENV || '').toLowerCase();  // dev = 完全免登（自动 dev 用户）
 const LOGIN_MODE = (process.env.LOGIN_MODE || 'dingtalk').toLowerCase();
 const DINGTALK_CLIENT_ID = process.env.DINGTALK_CLIENT_ID || '';
 const DINGTALK_CLIENT_SECRET = process.env.DINGTALK_CLIENT_SECRET || '';
 const DINGTALK_REDIRECT_URI = process.env.DINGTALK_REDIRECT_URI || '';
 
+// dev 环境的内置免登用户
+const DEV_USER = {
+  userId: 'dev',
+  userName: '开发者',
+  orgName: '开发环境',
+  orgId: '',
+  role: '管理员',
+  dept: '管理层',
+  avatar: null,
+  dataSource: 'dev',
+  loginTime: new Date().toISOString()
+};
+
 // ==================== API 路由 ====================
 
 app.get('/api/whoami', async (req, res) => {
+  // dev 环境：完全免登，直接返回内置 dev 用户
+  if (ENV === 'dev') {
+    return res.json({ ...DEV_USER, loginTime: new Date().toISOString() });
+  }
   // 从 cookies 缓存中读取本机已登录的宜搭身份
   const cookiesFile = COOKIES_FILE;
   try {
@@ -92,6 +110,7 @@ app.get('/api/whoami', async (req, res) => {
 app.get('/api/auth/config', (req, res) => {
   const dingtalkConfigured = !!(DINGTALK_CLIENT_ID && DINGTALK_CLIENT_SECRET && DINGTALK_REDIRECT_URI);
   res.json({
+    env: ENV,
     loginMode: LOGIN_MODE,
     dingtalk: {
       clientId: DINGTALK_CLIENT_ID,
@@ -158,8 +177,8 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     cache: CACHE.lastUpdated,
-    model: DEFAULT_MODEL,
-    apiConfigured: !!API_KEY,
+    model: OPENAI_MODEL,
+    apiConfigured: !!OPENAI_API_KEY,
     yidaConnected: yida.isAvailable(),
     dataSource: CACHE.dataSource
   });
@@ -218,97 +237,121 @@ app.post('/api/cache/refresh', (req, res) => {
   res.json({ success: true, cache: fresh });
 });
 
-// ==================== AI 工具定义（Anthropic tool_use 协议） ====================
+// ==================== AI 工具定义（OpenAI function calling 协议） ====================
 
 const TOOLS = [
   {
-    name: 'yida_app_list',
-    description: '列出当前企业下所有宜搭应用，返回 appType 和 appName。当需要了解有哪些可用业务系统、不确定去哪个应用查数据时调用。',
-    input_schema: { type: 'object', properties: {}, required: [] }
-  },
-  {
-    name: 'yida_form_list',
-    description: '列出指定宜搭应用下的所有表单（含表单名、formUuid、formType）。formType 为 "form" 表示普通表单，"process" 表示流程表单。需要知道某个应用有哪些可查表单时调用。',
-    input_schema: {
-      type: 'object',
-      properties: { appType: { type: 'string', description: '宜搭应用标识，由 yida_app_list 返回' } },
-      required: ['appType']
+    type: 'function',
+    function: {
+      name: 'yida_app_list',
+      description: '列出当前企业下所有宜搭应用，返回 appType 和 appName。当需要了解有哪些可用业务系统、不确定去哪个应用查数据时调用。',
+      parameters: { type: 'object', properties: {}, required: [] }
     }
   },
   {
-    name: 'yida_form_data',
-    description: '查询指定表单的实时业务数据。返回 records 数组（每条含 title/instanceStatus/approvedResult/originator/gmtCreate 等关键字段和完整的 formData）和 total（总记录数）。每次最多返回 50 条；total 更大时可换页续查（改 page 参数）。注意：formType 必须与 yida_form_list 返回的一致（"form" 或 "process"），否则接口会失败。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        appType:  { type: 'string', description: '宜搭应用标识' },
-        formUuid: { type: 'string', description: '表单唯一标识，由 yida_form_list 返回' },
-        formType: { type: 'string', description: '"form" 或 "process"，由 yida_form_list 返回' },
-        page:     { type: 'integer', description: '页码，从 1 开始，默认 1' },
-        size:     { type: 'integer', description: '每页条数，默认 50，最大 50' }
-      },
-      required: ['appType', 'formUuid', 'formType']
+    type: 'function',
+    function: {
+      name: 'yida_form_list',
+      description: '列出指定宜搭应用下的所有表单（含表单名、formUuid、formType）。formType 为 "form" 表示普通表单，"process" 表示流程表单。需要知道某个应用有哪些可查表单时调用。',
+      parameters: {
+        type: 'object',
+        properties: { appType: { type: 'string', description: '宜搭应用标识，由 yida_app_list 返回' } },
+        required: ['appType']
+      }
     }
   },
   {
-    name: 'yida_form_schema',
-    description: '获取表单的字段定义（组件列表），返回每个字段的 id、类型、标签。当需要理解表单数据结构、确认字段含义时调用。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        appType:  { type: 'string', description: '宜搭应用标识' },
-        formUuid: { type: 'string', description: '表单唯一标识' }
-      },
-      required: ['appType', 'formUuid']
+    type: 'function',
+    function: {
+      name: 'yida_form_data',
+      description: '查询指定表单的实时业务数据。返回 records 数组（每条含 title/instanceStatus/approvedResult/originator/gmtCreate 等关键字段和完整的 formData）和 total（总记录数）。每次最多返回 50 条；total 更大时可换页续查（改 page 参数）。注意：formType 必须与 yida_form_list 返回的一致（"form" 或 "process"），否则接口会失败。',
+      parameters: {
+        type: 'object',
+        properties: {
+          appType:  { type: 'string', description: '宜搭应用标识' },
+          formUuid: { type: 'string', description: '表单唯一标识，由 yida_form_list 返回' },
+          formType: { type: 'string', description: '"form" 或 "process"，由 yida_form_list 返回' },
+          page:     { type: 'integer', description: '页码，从 1 开始，默认 1' },
+          size:     { type: 'integer', description: '每页条数，默认 50，最大 50' }
+        },
+        required: ['appType', 'formUuid', 'formType']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'yida_form_schema',
+      description: '获取表单的字段定义（组件列表），返回每个字段的 id、类型、标签。当需要理解表单数据结构、确认字段含义时调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          appType:  { type: 'string', description: '宜搭应用标识' },
+          formUuid: { type: 'string', description: '表单唯一标识' }
+        },
+        required: ['appType', 'formUuid']
+      }
     }
   },
   // ==================== DingPass Skills ====================
   {
-    name: 'dingpass_organization_list_departments',
-    description: '列出钉钉指定父部门下的所有子部门。用于查询组织架构、部门层级、组织人数等信息。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        parent_id: { type: 'number', description: '父部门ID，根部门为1' },
-        fetch_child: { type: 'boolean', description: '是否递归获取子部门' }
-      },
-      required: ['parent_id']
+    type: 'function',
+    function: {
+      name: 'dingpass_organization_list_departments',
+      description: '列出钉钉指定父部门下的所有子部门。用于查询组织架构、部门层级、组织人数等信息。',
+      parameters: {
+        type: 'object',
+        properties: {
+          parent_id: { type: 'number', description: '父部门ID，根部门为1' },
+          fetch_child: { type: 'boolean', description: '是否递归获取子部门' }
+        },
+        required: ['parent_id']
+      }
     }
   },
   {
-    name: 'dingpass_organization_get_employee',
-    description: '获取钉钉员工详细信息。用于查询员工信息、联系方式、所属部门等。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        userid: { type: 'string', description: '员工userid' }
-      },
-      required: ['userid']
+    type: 'function',
+    function: {
+      name: 'dingpass_organization_get_employee',
+      description: '获取钉钉员工详细信息。用于查询员工信息、联系方式、所属部门等。',
+      parameters: {
+        type: 'object',
+        properties: {
+          userid: { type: 'string', description: '员工userid' }
+        },
+        required: ['userid']
+      }
     }
   },
   {
-    name: 'dingpass_attendance_get_checkin_records',
-    description: '获取钉钉员工打卡记录。用于查询考勤数据、打卡时间、考勤状态等。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        userid_list: { type: 'array', items: { type: 'string' }, description: '用户ID列表（最多50个）' },
-        check_date_from: { type: 'string', description: '开始日期 YYYY-MM-DD' },
-        check_date_to: { type: 'string', description: '结束日期 YYYY-MM-DD' }
-      },
-      required: ['userid_list', 'check_date_from', 'check_date_to']
+    type: 'function',
+    function: {
+      name: 'dingpass_attendance_get_checkin_records',
+      description: '获取钉钉员工打卡记录。用于查询考勤数据、打卡时间、考勤状态等。',
+      parameters: {
+        type: 'object',
+        properties: {
+          userid_list: { type: 'array', items: { type: 'string' }, description: '用户ID列表（最多50个）' },
+          check_date_from: { type: 'string', description: '开始日期 YYYY-MM-DD' },
+          check_date_to: { type: 'string', description: '结束日期 YYYY-MM-DD' }
+        },
+        required: ['userid_list', 'check_date_from', 'check_date_to']
+      }
     }
   },
   {
-    name: 'dingpass_attendance_get_stats',
-    description: '获取钉钉考勤统计。用于查询月度考勤汇总、迟到次数、加班时长等统计数据。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        userid: { type: 'string', description: '用户ID' },
-        month: { type: 'string', description: '统计月份 YYYY-MM' }
-      },
-      required: ['userid', 'month']
+    type: 'function',
+    function: {
+      name: 'dingpass_attendance_get_stats',
+      description: '获取钉钉考勤统计。用于查询月度考勤汇总、迟到次数、加班时长等统计数据。',
+      parameters: {
+        type: 'object',
+        properties: {
+          userid: { type: 'string', description: '用户ID' },
+          month: { type: 'string', description: '统计月份 YYYY-MM' }
+        },
+        required: ['userid', 'month']
+      }
     }
   }
 ];
@@ -320,9 +363,9 @@ const MAX_TOOL_ROUNDS = 5;
 app.post('/api/chat', async (req, res) => {
   const { message, history = [], user = {} } = req.body;
   if (!message) return res.status(400).json({ error: '消息不能为空' });
-  if (!API_KEY) return res.json({ reply: 'AI 服务未配置，请联系管理员设置 API Key。' });
+  if (!OPENAI_API_KEY) return res.json({ reply: 'AI 服务未配置，请联系管理员设置 API Key。' });
 
-  const conversationHistory = history.filter(h => h.role === 'user' || h.role === 'assistant');
+  const conversationHistory = history.filter(h => ['user', 'assistant', 'tool'].includes(h.role));
 
   // SSE 响应
   res.setHeader('Content-Type', 'text/event-stream');
@@ -337,40 +380,56 @@ app.post('/api/chat', async (req, res) => {
   res.write(`data: ${JSON.stringify({ type: 'meta', dataSource: CACHE.dataSource, modulesCount: Object.keys(CACHE.modules).length })}\n\n`);
 
   try {
-    const messages = [
+    // 对话历史 + 当前用户消息（OpenAI 格式）
+    const baseMessages = [
       ...conversationHistory.slice(-20),
       { role: 'user', content: message }
     ];
+    // 工具交互消息（随轮次追加）
+    const toolMessages = [];
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const systemPrompt = buildSystemPrompt(user);
 
-      const response = await fetch(`${API_BASE}/v1/messages`, {
+      // 构造完整的 OpenAI messages：system + 历史 + 用户消息 + 工具交互
+      const openaiMessages = [
+        { role: 'system', content: systemPrompt },
+        ...baseMessages,
+        ...toolMessages
+      ];
+
+      const requestBody = {
+        model: OPENAI_MODEL,
+        max_tokens: 4096,
+        stream: true,
+        messages: openaiMessages,
+        tools: TOOLS
+      };
+
+      // 部分提供商支持 reasoning_effort（如 OpenAI o-系列），按需注入
+      if (Number(process.env.AI_THINKING_BUDGET) > 0) {
+        requestBody.reasoning_effort = 'high';
+      }
+
+      const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({
-          model: DEFAULT_MODEL,
-          max_tokens: 4096,
-          stream: true,
-          system: systemPrompt,
-          messages,
-          tools: TOOLS,
-          ...(Number(process.env.AI_THINKING_BUDGET) > 0
-            ? { thinking: { type: 'enabled', budget_tokens: Number(process.env.AI_THINKING_BUDGET) } }
-            : {})
-        })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${OPENAI_API_KEY}`
+        },
+        body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) {
         const err = await response.text();
-        throw new Error(`AI 服务返回错误: ${response.status}`);
+        throw new Error(`AI 服务返回错误: ${response.status} ${err}`);
       }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let blocks = {};
-      let stopReason = null;
+      let pendingToolCalls = [];  // OpenAI 格式的 tool_calls 累积
+      let finishReason = null;
       let suggFenceIdx = -1;  // finalReply 中 ```suggestions 的位置
       let emitted = 0;        // 已流给前端的字符数
 
@@ -384,101 +443,113 @@ app.post('/api/chat', async (req, res) => {
 
         for (const line of lines) {
           const dataStr = line.startsWith('data: ') ? line.slice(6).trim() : '';
-          if (!dataStr) continue;
+          if (!dataStr || dataStr === '[DONE]') continue;
 
           try {
-            const event = JSON.parse(dataStr);
+            const chunk = JSON.parse(dataStr);
+            const choice = chunk.choices?.[0];
+            if (!choice) continue;
 
-            if (event.type === 'content_block_start') {
-              const cb = event.content_block;
-              blocks[event.index] = { type: cb.type, id: cb.id, name: cb.name, inputJson: '' };
+            const delta = choice.delta || {};
+            const finish = choice.finish_reason;
+            if (finish) finishReason = finish;
+
+            // 文本内容流
+            if (delta.content) {
+              const text = delta.content;
+              finalReply += text;
+              // 追问块实时扣留：检测到 ```suggestions 后不再流 token
+              if (suggFenceIdx === -1) suggFenceIdx = finalReply.indexOf(SUGG_FENCE);
+              const safeEnd = suggFenceIdx !== -1
+                ? suggFenceIdx
+                : Math.max(emitted, finalReply.length - SUGG_FENCE.length);
+              if (safeEnd > emitted) {
+                res.write(`data: ${JSON.stringify({ type: 'token', text: finalReply.slice(emitted, safeEnd) })}\n\n`);
+                emitted = safeEnd;
+              }
             }
-            else if (event.type === 'content_block_delta') {
-              const block = blocks[event.index];
-              if (!block) continue;
-              const dt = event.delta?.type;
-              if (dt === 'text_delta') {
-                const text = event.delta.text || '';
-                finalReply += text;
-                // 追问块实时扣留：检测到 ```suggestions 后不再流 token
-                if (suggFenceIdx === -1) suggFenceIdx = finalReply.indexOf(SUGG_FENCE);
-                const safeEnd = suggFenceIdx !== -1
-                  ? suggFenceIdx
-                  : Math.max(emitted, finalReply.length - SUGG_FENCE.length);
-                if (safeEnd > emitted) {
-                  res.write(`data: ${JSON.stringify({ type: 'token', text: finalReply.slice(emitted, safeEnd) })}\n\n`);
-                  emitted = safeEnd;
+
+            // 思考内容流（部分提供商如 DeepSeek 使用 reasoning_content）
+            if (delta.reasoning_content) {
+              res.write(`data: ${JSON.stringify({ type: 'thinking', text: delta.reasoning_content })}\n\n`);
+            }
+
+            // 工具调用流（按 index 累积 arguments 片段）
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                if (!pendingToolCalls[tc.index]) {
+                  pendingToolCalls[tc.index] = {
+                    id: tc.id || '',
+                    type: 'function',
+                    function: { name: tc.function?.name || '', arguments: '' }
+                  };
                 }
-              } else if (dt === 'thinking_delta') {
-                const t = event.delta.thinking || '';
-                res.write(`data: ${JSON.stringify({ type: 'thinking', text: t })}\n\n`);
-              } else if (dt === 'input_json_delta') {
-                block.inputJson += event.delta.partial_json || '';
+                if (tc.id) pendingToolCalls[tc.index].id = tc.id;
+                if (tc.function?.name) pendingToolCalls[tc.index].function.name = tc.function.name;
+                if (tc.function?.arguments) {
+                  pendingToolCalls[tc.index].function.arguments += tc.function.arguments;
+                }
               }
-            }
-            else if (event.type === 'content_block_stop') {
-              const block = blocks[event.index];
-              if (block && block.type === 'tool_use' && block.inputJson) {
-                try { block.input = JSON.parse(block.inputJson); delete block.inputJson; } catch {}
-              }
-            }
-            else if (event.type === 'message_delta') {
-              stopReason = event.delta?.stop_reason;
             }
           } catch {}
         }
       }
 
-      // 工具调用轮
-      if (stopReason === 'tool_use') {
+      // 工具调用轮（finish_reason === 'tool_calls'）
+      if (finishReason === 'tool_calls' && pendingToolCalls.length > 0) {
         finalReply = '';
-        const toolBlocks = Object.values(blocks).filter(b => b.type === 'tool_use' && b.name);
 
-        for (const tb of toolBlocks) {
-          const input = tb.input || {};
-          res.write(`data: ${JSON.stringify({ type: 'tool_call', name: tb.name, input })}\n\n`);
+        // 构造 assistant 消息（含 tool_calls），追加到 messages 供下一轮发送
+        const assistantMsg = {
+          role: 'assistant',
+          content: null,
+          tool_calls: pendingToolCalls.map(tc => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.function.name, arguments: tc.function.arguments }
+          }))
+        };
+        toolMessages.push(assistantMsg);
+
+        for (const tc of pendingToolCalls) {
+          let input = {};
+          try { input = JSON.parse(tc.function.arguments); } catch {}
+          const toolName = tc.function.name;
+
+          res.write(`data: ${JSON.stringify({ type: 'tool_call', name: toolName, input })}\n\n`);
 
           try {
-            // 处理 dingpass skill 调用
             let result;
-            if (tb.name.startsWith('dingpass_')) {
-              // 解析 skill 名称和动作
-              const parts = tb.name.replace('dingpass_', '').split('_');
-              const moduleName = parts[0]; // organization | attendance
+            if (toolName.startsWith('dingpass_')) {
+              const parts = toolName.replace('dingpass_', '').split('_');
+              const moduleName = parts[0];
               const actionName = parts.slice(1).join('_');
-
               result = await callSkill('dingpass', {
                 module: moduleName,
                 action: actionName,
                 params: input
               });
             } else {
-              result = await executeTool(tb.name, input);
+              result = await executeTool(toolName, input);
             }
 
             const resultStr = JSON.stringify(result);
-            const summary = calcToolSummary(tb.name, result);
-            res.write(`data: ${JSON.stringify({ type: 'tool_result', name: tb.name, summary, total: result.total })}\n\n`);
-            toolCalls.push({ name: tb.name, input, result: summary });
+            const summary = calcToolSummary(toolName, result);
+            res.write(`data: ${JSON.stringify({ type: 'tool_result', name: toolName, summary, total: result.total })}\n\n`);
+            toolCalls.push({ name: toolName, input, result: summary });
 
-            messages.push({
-              role: 'assistant',
-              content: [{ type: 'tool_use', id: tb.id, name: tb.name, input }]
-            });
-            messages.push({
-              role: 'user',
-              content: [{ type: 'tool_result', tool_use_id: tb.id, content: resultStr }]
+            toolMessages.push({
+              role: 'tool',
+              content: resultStr,
+              tool_call_id: tc.id
             });
           } catch (e) {
             const errStr = JSON.stringify({ error: e.message });
-            res.write(`data: ${JSON.stringify({ type: 'tool_result', name: tb.name, error: e.message })}\n\n`);
-            messages.push({
-              role: 'assistant',
-              content: [{ type: 'tool_use', id: tb.id, name: tb.name, input }]
-            });
-            messages.push({
-              role: 'user',
-              content: [{ type: 'tool_result', tool_use_id: tb.id, content: errStr, is_error: true }]
+            res.write(`data: ${JSON.stringify({ type: 'tool_result', name: toolName, error: e.message })}\n\n`);
+            toolMessages.push({
+              role: 'tool',
+              content: errStr,
+              tool_call_id: tc.id
             });
           }
         }
@@ -563,10 +634,10 @@ function buildSystemPrompt(user) {
 ## 可用工具
 - **宜搭工具**: yida_app_list, yida_form_list, yida_form_data, yida_form_schema
 - **钉钉工具 (DingPass)**:
-  - `dingpass_organization_list_departments` - 查询组织架构部门列表
-  - `dingpass_organization_get_employee` - 查询员工详细信息
-  - `dingpass_attendance_get_checkin_records` - 查询打卡记录
-  - `dingpass_attendance_get_stats` - 查询考勤统计
+  - \`dingpass_organization_list_departments\` - 查询组织架构部门列表
+  - \`dingpass_organization_get_employee\` - 查询员工详细信息
+  - \`dingpass_attendance_get_checkin_records\` - 查询打卡记录
+  - \`dingpass_attendance_get_stats\` - 查询考勤统计
 
 ## 对话规则
 - 对话历史在 messages 中完整保留，指代词如"这两条""继续分析""详细说说"要从历史中找到上一轮提到的具体记录
@@ -604,9 +675,9 @@ startPrecompute();
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`\nAI 秘书后端已启动: http://localhost:${PORT}`);
-  console.log(`模型: ${DEFAULT_MODEL}`);
-  console.log(`API: ${API_BASE}`);
-  console.log(`API Key: ${API_KEY ? '已配置' : '未配置'}`);
+  console.log(`模型: ${OPENAI_MODEL}`);
+  console.log(`API: ${OPENAI_BASE_URL}`);
+  console.log(`API Key: ${OPENAI_API_KEY ? '已配置' : '未配置'}`);
   console.log(`宜搭连接: ${yida.isAvailable() ? '已连接 (' + yida.baseUrl + ')' : '未连接'}`);
   console.log(`数据源: ${CACHE.dataSource}`);
   console.log(`缓存最后更新: ${CACHE.lastUpdated}`);
