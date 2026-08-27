@@ -1,8 +1,8 @@
 <script setup>
 import MessageBubble from './MessageBubble.vue';
-import { t, I18N } from '../i18n.js';
+import { t, I18N, getLocale } from '../i18n.js';
 
-const MODULE_NAMES = I18N.app.moduleNames;
+const MODULE_NAMES = I18N[getLocale()].app.moduleNames;
 
 const props = defineProps({
   activeConv: { type: Object, required: true },
