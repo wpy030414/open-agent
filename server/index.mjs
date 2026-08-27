@@ -33,7 +33,7 @@ const DINGTALK_REDIRECT_URI = process.env.DINGTALK_REDIRECT_URI || '';
 // dev 环境的内置免登用户
 const DEV_USER = {
   userId: 'dev',
-  userName: '开发者',
+  userName: '玫东用户',
   orgName: '开发环境',
   orgId: '',
   role: '管理员',

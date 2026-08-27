@@ -16,13 +16,13 @@ const QUICK_ICONS = ['bar_chart', 'rocket_launch', 'groups', 'account_balance_wa
 // 基于真实数据生成问题（移植自 App.jsx）
 function makeQuestion(m) {
   if (m.formName.includes('打卡') || m.formName.includes('考勤')) {
-    return `${m.formName}最新数据如何？共${m.totalCount}条记录`;
+    return t('app.home.questionAttendance', { formName: m.formName, totalCount: m.totalCount });
   } else if (m.formName.includes('申请') || m.formName.includes('审批')) {
-    return `${m.formName}有多少待处理？共${m.totalCount}条`;
+    return t('app.home.questionApproval', { formName: m.formName, totalCount: m.totalCount });
   } else if (m.formName.includes('课程') || m.formName.includes('社团')) {
-    return `${m.formName}开展情况如何？共${m.totalCount}条记录`;
+    return t('app.home.questionCourse', { formName: m.formName, totalCount: m.totalCount });
   }
-  return `${m.formName}数据概况？共${m.totalCount}条`;
+  return t('app.home.questionDefault', { formName: m.formName, totalCount: m.totalCount });
 }
 
 const greeting = computed(() => t('app.home.greeting', { userName: props.user.userName }));

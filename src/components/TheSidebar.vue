@@ -15,9 +15,9 @@ const emit = defineEmits(['new-chat', 'select', 'delete', 'logout']);
 const { themeMode, setThemeMode } = useTheme();
 
 const MODES = [
-  { value: 'system', label: '跟随系统', icon: 'desktop_windows' },
-  { value: 'light', label: '白日', icon: 'light_mode' },
-  { value: 'dark', label: '黑夜', icon: 'dark_mode' },
+  { value: 'system', label: t('settings.themeSystem'), icon: 'desktop_windows' },
+  { value: 'light', label: t('settings.themeLight'), icon: 'light_mode' },
+  { value: 'dark', label: t('settings.themeDark'), icon: 'dark_mode' },
 ];
 
 // 气泡菜单（md-menu + popover API，顶层渲染，不会被侧边栏 overflow:hidden 裁切）
@@ -60,11 +60,11 @@ const onDelete = (id, e) => emit('delete', id, e);
 
       <button class="new-chat-btn" @click="$emit('new-chat')">
         <md-icon>add</md-icon>
-        <span>新建对话</span>
+        <span>{{ t('app.sidebar.newChat') }}</span>
       </button>
 
       <nav class="conversation-list">
-        <div v-if="conversations.length === 0" class="empty-state">暂无历史对话</div>
+        <div v-if="conversations.length === 0" class="empty-state">{{ t('app.sidebar.emptyState') }}</div>
         <div
           v-for="conv in conversations"
           :key="conv.id"
@@ -78,7 +78,7 @@ const onDelete = (id, e) => emit('delete', id, e);
           </div>
           <button
             class="delete-btn"
-            title="删除"
+            :title="t('app.sidebar.deleteConversation')"
             @click="onDelete(conv.id, $event)"
           >
             <md-icon>delete</md-icon>
@@ -91,11 +91,11 @@ const onDelete = (id, e) => emit('delete', id, e);
         <div class="sidebar-user">
           <img v-if="user?.avatar" class="user-avatar" :src="user.avatar" alt="" />
           <md-icon v-else class="user-avatar-icon">account_circle</md-icon>
-          <span class="user-name">{{ user?.userName || '用户' }}</span>
+          <span class="user-name">{{ user?.userName || t('user.defaultName') }}</span>
           <md-icon-button
             id="settings-anchor"
             class="settings-btn"
-            title="设置"
+            :title="t('app.sidebar.settings')"
             @click="toggleMenu"
           >
             <md-icon>settings</md-icon>
@@ -116,7 +116,7 @@ const onDelete = (id, e) => emit('delete', id, e);
     >
       <!-- 主题：内联下拉切换 -->
       <md-menu-item type="none" class="menu-label">
-        <span slot="headline" class="menu-label-text">主题</span>
+        <span slot="headline" class="menu-label-text">{{ t('settings.theme') }}</span>
       </md-menu-item>
       <md-menu-item
         v-for="m in MODES"
@@ -134,7 +134,7 @@ const onDelete = (id, e) => emit('delete', id, e);
       <md-divider role="separator"></md-divider>
       <md-menu-item class="logout-item" @click="onLogout">
         <md-icon slot="start">logout</md-icon>
-        <span slot="headline">退出登录</span>
+        <span slot="headline">{{ t('user.logout') }}</span>
       </md-menu-item>
     </md-menu>
   </aside>

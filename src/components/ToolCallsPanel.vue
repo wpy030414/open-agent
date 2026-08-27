@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue';
+import { t } from '../i18n.js';
 
 defineProps({
   calls: { type: Array, default: () => [] }
@@ -12,7 +13,7 @@ const open = ref(false);
   <div class="tool-calls-panel">
     <button class="tool-calls-toggle" @click="open = !open">
       <span class="tool-calls-toggle-icon">{{ open ? '▼' : '▶' }}</span>
-      <span>🔧 工具调用（{{ calls.length }} 次）</span>
+      <span>{{ t('toolCalls.title', { count: calls.length }) }}</span>
     </button>
     <div v-if="open" class="tool-calls-list">
       <div v-for="(tc, i) in calls" :key="i" class="tool-call-item">

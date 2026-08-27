@@ -6,6 +6,7 @@
  * - dingtalk：跳转钉钉 OAuth，回调页用 code 换身份
  */
 import { ref, watch, computed } from 'vue';
+import { t } from '../i18n.js';
 
 // 端点
 const IDENTITY_ENDPOINT = '/api/whoami';
@@ -73,11 +74,11 @@ export function useAuth() {
   // 后端 identity → 前端 user
   const mapIdentity = (identity) => ({
     userId: identity.userId,
-    userName: identity.userName || '用户',
+    userName: identity.userName || t('user.defaultName'),
     orgName: identity.orgName || '',
     orgId: identity.orgId,
-    role: identity.role || '管理员',
-    dept: identity.dept || '管理层',
+    role: identity.role || t('user.roleAdmin'),
+    dept: identity.dept || t('user.deptManagement'),
     avatar: identity.avatar || null,
     dataSource: identity.dataSource || 'yida',
     loginTime: identity.loginTime || new Date().toISOString()
@@ -100,10 +101,10 @@ export function useAuth() {
           // /api/whoami 失败时用前端兜底 dev 用户
           user.value = {
             userId: 'dev',
-            userName: '开发者',
-            orgName: '开发环境',
-            role: '管理员',
-            dept: '管理层',
+            userName: t('user.devName'),
+            orgName: t('user.devOrg'),
+            role: t('user.roleAdmin'),
+            dept: t('user.deptManagement'),
             dataSource: 'dev'
           };
         }
@@ -116,7 +117,7 @@ export function useAuth() {
     const res = await fetch(IDENTITY_ENDPOINT);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || '身份获取失败');
+      throw new Error(err.error || t('errors.identityFetchFailed'));
     }
     const identity = await res.json();
     const u = mapIdentity(identity);
@@ -129,7 +130,7 @@ export function useAuth() {
     if (loginMode.value === 'dingtalk') {
       const { clientId, redirectUri } = dingtalkConfig.value;
       if (!clientId || !redirectUri) {
-        throw new Error('钉钉登录未配置');
+        throw new Error(t('errors.dingtalkNotConfigured'));
       }
       const state = makeAndStashState();
       window.location.href = getDingTalkLoginUrl(clientId, redirectUri, state);
@@ -148,7 +149,7 @@ export function useAuth() {
     const savedState = sessionStorage.getItem(DINGTALK_STATE_KEY);
     sessionStorage.removeItem(DINGTALK_STATE_KEY);
     if (state && savedState && state !== savedState) {
-      throw new Error('登录状态校验失败（state 不匹配），请重新登录');
+      throw new Error(t('errors.stateMismatch'));
     }
     const res = await fetch(DINGTALK_CALLBACK_ENDPOINT, {
       method: 'POST',
@@ -157,7 +158,7 @@ export function useAuth() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || '钉钉登录失败');
+      throw new Error(err.error || t('errors.dingtalkLoginFailed'));
     }
     const identity = await res.json();
     const u = mapIdentity(identity);

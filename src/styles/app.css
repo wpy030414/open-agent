@@ -862,6 +862,16 @@ md-menu.settings-menu,
     box-shadow: var(--md-sys-elevation-3);
   }
 
+  /* 移动端侧边栏遮罩：点击收起 */
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+    background: rgba(0, 0, 0, 0.32);
+    animation: fadeIn 0.2s ease;
+    cursor: pointer;
+  }
+
   .quick-actions {
     grid-template-columns: 1fr;
   }

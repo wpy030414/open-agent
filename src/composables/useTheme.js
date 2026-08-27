@@ -7,15 +7,16 @@
  */
 import { ref, watch, computed } from 'vue';
 import { argbFromHex, hexFromArgb, Hct, SchemeTonalSpot } from '@material/material-color-utilities';
+import { t } from '../i18n.js';
 
 const SEED_KEY = 'ai-secretary-seed';
 const THEME_MODE_KEY = 'ai-secretary-theme-mode';
 
 // 内置色板：蓝 绿 粉
 export const PRESET_SEEDS = [
-  { name: '蓝', hex: '#0061a4' },
-  { name: '绿', hex: '#386a20' },
-  { name: '粉', hex: '#984061' },
+  { nameKey: 'theme.colorBlue', hex: '#0061a4' },
+  { nameKey: 'theme.colorGreen', hex: '#386a20' },
+  { nameKey: 'theme.colorPink', hex: '#984061' },
 ];
 
 // Scheme 实例 → {tokenName: hex}（camelCase → kebab-case）

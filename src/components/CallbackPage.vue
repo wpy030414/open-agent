@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue';
+import { t } from '../i18n.js';
 
 const props = defineProps({
   finishDingTalkLogin: { type: Function, required: true }
@@ -14,7 +15,7 @@ onMounted(async () => {
   const state = params.get('state');
 
   if (!code) {
-    error.value = '回调链接无效，缺少授权码 code';
+    error.value = t('errors.callbackInvalidLink');
     status.value = 'error';
     return;
   }
@@ -23,7 +24,7 @@ onMounted(async () => {
     await props.finishDingTalkLogin(code, state);
     window.history.replaceState({}, '', window.location.pathname);
   } catch (e) {
-    error.value = e.message || '钉钉登录失败';
+    error.value = e.message || t('errors.dingtalkLoginFailed');
     status.value = 'error';
   }
 });
@@ -34,16 +35,16 @@ onMounted(async () => {
     <div class="callback-card">
       <template v-if="status === 'processing'">
         <div class="callback-icon loading"><md-icon>smart_toy</md-icon></div>
-        <h2>正在登录...</h2>
-        <p>请稍候，正在完成钉钉身份验证</p>
+        <h2>{{ t('callback.loggingIn') }}</h2>
+        <p>{{ t('callback.verifying') }}</p>
         <div class="loading-spinner" />
       </template>
 
       <template v-else-if="status === 'error'">
         <div class="callback-icon error"><md-icon>warning</md-icon></div>
-        <h2>登录失败</h2>
+        <h2>{{ t('errors.loginFailed') }}</h2>
         <p>{{ error }}</p>
-        <button @click="window.location.href = '/'">返回首页</button>
+        <button @click="window.location.href = '/'">{{ t('callback.backToHome') }}</button>
       </template>
     </div>
   </div>

@@ -6,6 +6,7 @@
  *   meta / token / thinking / tool_call / tool_result / done / error
  */
 import { ref, watch } from 'vue';
+import { t } from '../i18n.js';
 
 const CONV_KEY = 'ai-secretary-conversations';
 
@@ -191,13 +192,13 @@ export function useChat(userRef) {
                 if (Array.isArray(event.suggestions)) suggestions = event.suggestions;
                 break;
               case 'error':
-                throw new Error(event.error || 'AI 调用失败');
+                throw new Error(event.error || t('errors.aiCallFailed'));
             }
           }
         }
       }
 
-      if (!streamedContent) streamedContent = 'AI 未能生成回复，请重试。';
+      if (!streamedContent) streamedContent = t('errors.noReply');
       setLastMsg(convId, {
         role: 'assistant',
         content: streamedContent,
@@ -208,7 +209,7 @@ export function useChat(userRef) {
         toolCalls: toolCallsAcc
       });
     } catch (e) {
-      alert(`发送失败: ${e.message}`);
+      alert(`${t('errors.sendFailed')}: ${e.message}`);
       const conv = conversations.value.find(c => c.id === convId);
       if (conv) {
         const msgs = conv.messages;

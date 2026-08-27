@@ -1,5 +1,6 @@
 <script setup>
-import { ref, watch, onMounted, nextTick } from 'vue';
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { t } from '../i18n.js';
 import TheSidebar from './TheSidebar.vue';
 import HomeView from './HomeView.vue';
 import ChatView from './ChatView.vue';
@@ -11,6 +12,12 @@ const props = defineProps({
 });
 
 const collapsed = ref(false);
+const isMobile = ref(false);
+
+// 监听视口宽度，判断是否移动端
+const updateIsMobile = () => {
+  isMobile.value = window.matchMedia('(max-width: 768px)').matches;
+};
 
 // 缓存模块（首页快捷操作用）
 const cachedModules = ref([]);
@@ -25,6 +32,11 @@ const {
 
 // 获取缓存模块列表，按数据量排序取前 4
 onMounted(() => {
+  updateIsMobile();
+  // 移动端默认收起侧边栏，避免遮挡主内容
+  if (isMobile.value) collapsed.value = true;
+  window.addEventListener('resize', updateIsMobile);
+
   fetch('/api/cache')
     .then(res => res.json())
     .then(data => {
@@ -35,6 +47,10 @@ onMounted(() => {
         .slice(0, 4);
     })
     .catch(e => console.error('获取缓存模块失败:', e));
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateIsMobile);
 });
 
 // 自动滚动到底部
@@ -69,6 +85,13 @@ const toggleSidebar = () => {
 
 <template>
   <div class="app-layout">
+    <!-- 移动端侧边栏遮罩：点击收起侧边栏 -->
+    <div
+      v-if="isMobile && !collapsed"
+      class="sidebar-backdrop"
+      @click="toggleSidebar"
+    ></div>
+
     <!-- 侧边栏 -->
     <TheSidebar
       :conversations="conversations"
@@ -89,7 +112,7 @@ const toggleSidebar = () => {
           toggle
           class="menu-btn"
           :class="{ collapsed }"
-          :title="collapsed ? '展开侧边栏' : '收起侧边栏'"
+          :title="collapsed ? t('app.sidebar.expandSidebar') : t('app.sidebar.collapseSidebar')"
           @click="toggleSidebar"
         >
           <md-icon>{{ collapsed ? 'menu' : 'menu_open' }}</md-icon>

@@ -1,31 +1,32 @@
 /**
- * i18n 配置 - AI 秘书 Web 原型
+ * i18n 配置 - 玫东智能体 Web 原型
  *
- * 白标化说明：
- * - 所有面向用户的字符串都集中在此文件
- * - 修改此处即可更换产品名、问候语、按钮文案等
- * - 支持多语言扩展（目前只有 zh-CN）
+ * 多语言包结构：{ 'zh-CN': { ... }, 'en-US': { ... } }
+ * 当前仅实现中文，英文等未来补充
  */
 
-export const I18N = {
+const zhCN = {
   // ==================== 白标化：产品信息 ====================
   product: {
-    name: 'AI 秘书',
-    shortName: 'AI 秘书',
+    name: '玫东智能体',
+    shortName: '玫东智能体',
     tagline: '您的智能业务数据分析助手',
-    description: '请登录以接入公司全部业务数据',
+    description: '请登录以接入组织全部业务数据',
     features: '销售 · 财务 · 人力资源 · 项目交付',
   },
 
   // ==================== 登录页 ====================
   login: {
-    title: 'AI 秘书',
+    title: '玫东智能体',
     subtitle: '您的智能业务数据分析助手',
-    description: '请登录以接入公司全部业务数据',
+    description: '请登录以接入组织全部业务数据',
     features: '销售 · 财务 · 人力资源 · 项目交付',
     button: '本机免登登录',
+    buttonDingTalk: '钉钉登录',
     buttonLoading: '正在登录...',
     tip: '将自动使用本机已登录的宜搭身份',
+    tipDingTalkReady: '将跳转至钉钉完成授权登录',
+    tipDingTalkNotConfigured: '钉钉登录未配置，请在 .env 设置 DINGTALK_CLIENT_ID / DINGTALK_CLIENT_SECRET / DINGTALK_REDIRECT_URI',
     featuresList: [
       { icon: 'chart', text: '实时数据查询' },
       { icon: 'rocket', text: '智能业务分析' },
@@ -33,46 +34,55 @@ export const I18N = {
     ],
   },
 
+  // ==================== 回调页 ====================
+  callback: {
+    loggingIn: '正在登录...',
+    verifying: '请稍候，正在完成钉钉身份验证',
+    backToHome: '返回首页',
+  },
+
   // ==================== 主界面 ====================
   app: {
-    // 侧边栏
     sidebar: {
       newChat: '新建对话',
       emptyState: '暂无历史对话',
+      expandSidebar: '展开侧边栏',
+      collapseSidebar: '收起侧边栏',
+      deleteConversation: '删除',
+      settings: '设置',
       footer: {
-        modelBadge: 'AI 秘书',
+        modelBadge: '玫东智能体',
         cacheInfo: '数据每 6 小时更新',
         themeToggle: '切换主题',
       },
     },
-    // 顶栏
     topBar: {
-      brand: 'AI 秘书',
+      brand: '玫东智能体',
     },
-    // 首页
     home: {
       greeting: '您好，{userName}',
-      subtitle: '我是您的 AI 秘书，已接入公司全部业务数据',
+      subtitle: '我是您的 玫东智能体，已接入组织全部业务数据',
       subtitle2: '可以即时回答您的业务问询，并自动调取相关数据分析',
       inputPlaceholder: '发送消息...',
-      inputHint: 'AI 秘书会基于公司真实数据回答，但可能偶尔出错，请核查关键数据',
+      inputHint: '玫东智能体会基于组织真实数据回答，但可能偶尔出错，请核查关键数据',
+      questionAttendance: '{formName}最新数据如何？共{totalCount}条记录',
+      questionApproval: '{formName}有多少待处理？共{totalCount}条',
+      questionCourse: '{formName}开展情况如何？共{totalCount}条记录',
+      questionDefault: '{formName}数据概况？共{totalCount}条',
     },
-    // 聊天页
     chat: {
       inputPlaceholder: '发送消息...',
-      inputHint: 'AI 秘书会基于公司真实数据回答，但可能偶尔出错，请核查关键数据',
+      inputHint: '玫东智能体会基于组织真实数据回答，但可能偶尔出错，请核查关键数据',
       loading: 'AI 正在分析数据...',
       cacheBadge: '已调取 {module} 数据',
       cacheBadgeDefault: '业务',
     },
-    // 快捷问题
     quickQuestions: [
       { icon: 'chart', text: '课后服务开展情况如何？', module: 'afterSchool' },
       { icon: 'wallet', text: '采购申请有多少待处理？', module: 'procurement' },
       { icon: 'people', text: '物品领用数据概况？', module: 'inventory' },
       { icon: 'rocket', text: '用车申请有多少？', module: 'vehicle' },
     ],
-    // 模块名称映射（用于 cache badge）
     moduleNames: {
       afterSchool: '课后服务管理',
       procurement: '采购管理',
@@ -84,11 +94,39 @@ export const I18N = {
     },
   },
 
-  // ==================== 用户菜单 ====================
+  // ==================== 用户 ====================
   user: {
+    defaultName: '用户',
+    devName: '玫东用户',
+    devOrg: '开发环境',
     logout: '退出登录',
     roleAdmin: '管理员',
     deptManagement: '管理层',
+  },
+
+  // ==================== 设置 ====================
+  settings: {
+    title: '设置',
+    theme: '主题',
+    themeSystem: '跟随系统',
+    themeLight: '白日',
+    themeDark: '黑夜',
+    close: '关闭',
+  },
+
+  // ==================== 主题色板 ====================
+  theme: {
+    colorBlue: '蓝',
+    colorGreen: '绿',
+    colorPink: '粉',
+  },
+
+  // ==================== 折叠面板 ====================
+  thinking: {
+    title: '思考过程',
+  },
+  toolCalls: {
+    title: '🔧 工具调用（{count} 次）',
   },
 
   // ==================== 错误提示 ====================
@@ -96,8 +134,39 @@ export const I18N = {
     loginFailed: '登录失败',
     identityFetchFailed: '身份获取失败',
     sendFailed: '发送失败',
+    callbackInvalidLink: '回调链接无效，缺少授权码 code',
+    dingtalkLoginFailed: '钉钉登录失败',
+    dingtalkNotConfigured: '钉钉登录未配置',
+    stateMismatch: '登录状态校验失败（state 不匹配），请重新登录',
+    aiCallFailed: 'AI 调用失败',
+    noReply: 'AI 未能生成回复，请重试。',
   },
 };
+
+export const I18N = {
+  'zh-CN': zhCN,
+};
+
+let currentLocale = 'zh-CN';
+
+export function setLocale(locale) {
+  if (I18N[locale]) {
+    currentLocale = locale;
+    localStorage.setItem('ai-secretary-locale', locale);
+  } else {
+    console.warn(`[i18n] 不支持的语言: ${locale}`);
+  }
+}
+
+export function getLocale() {
+  return currentLocale;
+}
+
+// 初始化时从 localStorage 读取
+const savedLocale = localStorage.getItem('ai-secretary-locale');
+if (savedLocale && I18N[savedLocale]) {
+  currentLocale = savedLocale;
+}
 
 /**
  * 获取 i18n 字符串，支持模板变量替换
@@ -107,7 +176,7 @@ export const I18N = {
  */
 export function t(path, vars = {}) {
   const keys = path.split('.');
-  let value = I18N;
+  let value = I18N[currentLocale];
 
   for (const key of keys) {
     if (value && typeof value === 'object' && key in value) {

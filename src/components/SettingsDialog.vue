@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch } from 'vue';
+import { t } from '../i18n.js';
 import { useTheme } from '../composables/useTheme.js';
 
 const props = defineProps({
@@ -11,9 +12,9 @@ const emit = defineEmits(['update:open', 'logout']);
 const { themeMode, setThemeMode } = useTheme();
 
 const MODES = [
-  { value: 'system', label: '跟随系统', icon: 'desktop_windows' },
-  { value: 'light', label: '白日', icon: 'light_mode' },
-  { value: 'dark', label: '黑夜', icon: 'dark_mode' },
+  { value: 'system', label: t('settings.themeSystem'), icon: 'desktop_windows' },
+  { value: 'light', label: t('settings.themeLight'), icon: 'light_mode' },
+  { value: 'dark', label: t('settings.themeDark'), icon: 'dark_mode' },
 ];
 
 const dialogRef = ref(null);
@@ -38,11 +39,11 @@ const handleLogout = () => {
 
 <template>
   <dialog ref="dialogRef" class="settings-dialog" @close="handleClose">
-    <div class="settings-dialog-headline">设置</div>
+    <div class="settings-dialog-headline">{{ t('settings.title') }}</div>
 
     <form class="settings-content" method="dialog">
       <div class="settings-section">
-        <div class="settings-section-title">主题</div>
+        <div class="settings-section-title">{{ t('settings.theme') }}</div>
         <div class="theme-options">
           <button
             v-for="m in MODES"
@@ -61,10 +62,10 @@ const handleLogout = () => {
     <div class="settings-actions">
       <md-text-button type="button" class="logout-btn" @click="handleLogout">
         <md-icon slot="icon">logout</md-icon>
-        退出登录
+        {{ t('user.logout') }}
       </md-text-button>
       <md-text-button type="button" value="close" @click="handleClose">
-        关闭
+        {{ t('settings.close') }}
       </md-text-button>
     </div>
   </dialog>
