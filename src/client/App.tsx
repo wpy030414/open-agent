@@ -1,0 +1,167 @@
+import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useChat } from './hooks/useChat'
+import { useAdmin } from './hooks/useAdmin'
+import { useTheme } from './hooks/useTheme'
+import { Sidebar } from './components/sidebar/Sidebar'
+import { ChatPanel } from './components/chat/ChatPanel'
+import { SettingsDialog } from './components/settings/SettingsDialog'
+import { MenuDialog } from './components/settings/MenuDialog'
+import { LoginScreen } from './components/auth/LoginScreen'
+import { Button } from './components/ui/button'
+import { PanelLeft } from 'lucide-react'
+import { api, getUser } from './lib/api'
+
+export function App() {
+  const { t, i18n } = useTranslation()
+  const chat = useChat()
+  const admin = useAdmin()
+  const { theme, setTheme } = useTheme()
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [appName, setAppName] = useState('Open Agent')
+  const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 768
+    }
+    return false
+  })
+
+  const handleLogin = (username: string) => {
+    localStorage.setItem('user', username)
+    setCurrentUser(username)
+    // Reload conversations for the new user
+    setTimeout(() => chat.refreshConversations(), 100)
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('user')
+    setCurrentUser(null)
+    // Clear current session
+    chat.createConversation()
+  }
+
+  useEffect(() => {
+    api.getAppName().then((r) => {
+      setAppName(r.app_name)
+      if (r.app_favicon) {
+        const link = document.getElementById('favicon') as HTMLLinkElement | null
+        if (link) link.href = r.app_favicon
+      }
+    }).catch(() => {})
+  }, [])
+
+  // Re-fetch appName + favicon when admin settings close (user may have changed them)
+  useEffect(() => {
+    if (!settingsOpen) {
+      api.getAppName().then((r) => {
+        setAppName(r.app_name)
+        if (r.app_favicon) {
+          const link = document.getElementById('favicon') as HTMLLinkElement | null
+          if (link) link.href = r.app_favicon
+        }
+      }).catch(() => {})
+    }
+  }, [settingsOpen])
+
+  // Update document title when appName changes
+  useEffect(() => {
+    document.title = appName
+  }, [appName])
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 767px)')
+    const handleChange = (e: MediaQueryListEvent) => {
+      if (e.matches) {
+        setSidebarOpen(false)
+      }
+    }
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [])
+
+  const handleLanguageChange = (lang: string) => {
+    i18n.changeLanguage(lang)
+  }
+
+  const handleAdminSettings = () => {
+    setMenuOpen(false)
+    // Radix Dialog 关闭时需要等待焦点管理完成，再打开新 Dialog
+    setTimeout(() => setSettingsOpen(true), 300)
+  }
+
+  // Show login screen if not logged in
+  if (!currentUser) {
+    return <LoginScreen onLogin={handleLogin} />
+  }
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-background">
+      {/* Sidebar */}
+      <div className={`
+        w-72 flex-shrink-0 border-r
+        transition-all duration-300 overflow-hidden
+        max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50
+        ${sidebarOpen ? '' : 'max-md:w-0 md:w-0 md:border-r-0'}
+      `}>
+        <Sidebar
+          conversations={chat.conversations}
+          activeId={chat.activeId}
+          onSelect={chat.selectConversation}
+          onNew={chat.createConversation}
+          onDelete={chat.deleteConversation}
+          onMenuClick={() => setMenuOpen(true)}
+          appName={appName}
+          currentUser={currentUser}
+        />
+      </div>
+
+      {/* Mobile backdrop */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Main area */}
+      <div className="flex-1 flex flex-col min-w-0 relative">
+        {/* Sidebar toggle button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="absolute top-3 left-3 z-30 h-8 w-8"
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+        >
+          <PanelLeft className="h-4 w-4" />
+        </Button>
+
+        {/* Chat area */}
+        <ChatPanel
+          messages={chat.messages}
+          loading={chat.loading}
+          onSend={chat.sendMessage}
+          onCancel={chat.cancel}
+          onPluginCall={chat.callPlugin}
+        />
+      </div>
+
+      {/* Menu Dialog */}
+      <MenuDialog
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        language={i18n.language}
+        onLanguageChange={handleLanguageChange}
+        theme={theme}
+        onThemeChange={setTheme}
+        onAdminSettings={handleAdminSettings}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+      />
+
+      {/* Settings Dialog (admin) */}
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} admin={admin} />
+    </div>
+  )
+}

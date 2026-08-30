@@ -1,0 +1,87 @@
+{
+  "app": {
+    "name": "Open Agent"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "save": "Save",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "remove": "Remove",
+    "authenticate": "Authenticate"
+  },
+  "chat": {
+    "inputPlaceholder": "Type a message... (Enter to send, Shift+Enter for newline)",
+    "startConversation": "Start a conversation",
+    "sendToBegin": "Send a message to begin",
+    "stopGenerating": "Stop generating",
+    "thinking": "Thinking...",
+    "thought": "Thought",
+    "renderFailed": "Render failed",
+    "pluginResult": "Plugin Result",
+    "pluginCallFailed": "Plugin call failed",
+    "unknownError": "Unknown error",
+    "errorMessage": "Error: {{message}}",
+    "connectionTimeout": "Connection lost, please retry",
+    "reconnecting": "Reconnecting..."
+  },
+  "sidebar": {
+    "newChat": "New Chat",
+    "noConversations": "No conversations yet",
+    "recent": "Recent"
+  },
+  "menu": {
+    "title": "Settings",
+    "login": "Login",
+    "loginComingSoon": "Not available yet",
+    "logout": "Logout",
+    "language": "Language",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "adminSettings": "Admin Settings",
+    "adminSettingsDesc": "Admin password required",
+    "about": "About"
+  },
+  "settings": {
+    "title": "Admin Settings",
+    "subtitleAuthenticated": "Manage global agent configuration",
+    "subtitleUnauthenticated": "Enter admin key to access settings",
+    "adminKeyPlaceholder": "Admin key",
+    "tabBranding": "Branding",
+    "appName": "App Name",
+    "appFavicon": "Favicon",
+    "uploadFavicon": "Upload Favicon",
+    "tabModel": "Model",
+    "tabPrompt": "Prompt",
+    "tabPlugins": "Plugins",
+    "tabSkills": "Skills",
+    "apiEndpoint": "API Endpoint",
+    "apiKey": "API Key",
+    "model": "Model",
+    "systemPrompt": "System Prompt",
+    "noPlugins": "No plugins installed",
+    "noSkills": "No skills installed",
+    "uploadPlugin": "Upload Plugin (.zip)",
+    "uploadSkill": "Upload Skill (.zip)",
+    "authFailed": "Auth failed"
+  },
+  "plugins": {
+    "title": "Plugins",
+    "available": "Available Plugins",
+    "call": "Call"
+  },
+  "server": {
+    "bannerTitle": "Open Agent Server",
+    "bannerPort": "Port: ",
+    "bannerAdminKey": "Admin key: "
+  },
+  "login": {
+    "title": "Welcome",
+    "subtitle": "Enter your username to continue",
+    "usernamePlaceholder": "Username",
+    "submit": "Continue"
+  }
+}

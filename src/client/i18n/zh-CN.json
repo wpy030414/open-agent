@@ -1,0 +1,87 @@
+{
+  "app": {
+    "name": "Open Agent"
+  },
+  "common": {
+    "loading": "加载中...",
+    "error": "错误",
+    "save": "保存",
+    "saving": "保存中...",
+    "cancel": "取消",
+    "confirm": "确认",
+    "remove": "移除",
+    "authenticate": "验证身份"
+  },
+  "chat": {
+    "inputPlaceholder": "输入消息...（Enter 发送，Shift+Enter 换行）",
+    "startConversation": "开始对话",
+    "sendToBegin": "发送一条消息开始吧",
+    "stopGenerating": "停止生成",
+    "thinking": "思考中...",
+    "thought": "已思考",
+    "renderFailed": "渲染失败",
+    "pluginResult": "插件结果",
+    "pluginCallFailed": "插件调用失败",
+    "unknownError": "未知错误",
+    "errorMessage": "错误：{{message}}",
+    "connectionTimeout": "连接超时，请重试",
+    "reconnecting": "正在重新连接..."
+  },
+  "sidebar": {
+    "newChat": "新对话",
+    "noConversations": "暂无对话",
+    "recent": "最近"
+  },
+  "menu": {
+    "title": "设置",
+    "login": "登录",
+    "loginComingSoon": "暂未开放",
+    "logout": "退出登录",
+    "language": "语言",
+    "theme": "主题",
+    "themeLight": "浅色",
+    "themeDark": "深色",
+    "adminSettings": "后台设置",
+    "adminSettingsDesc": "需要管理员密码",
+    "about": "关于"
+  },
+  "settings": {
+    "title": "后台设置",
+    "subtitleAuthenticated": "管理全局智能体配置",
+    "subtitleUnauthenticated": "输入管理员密钥以访问设置",
+    "adminKeyPlaceholder": "管理员密钥",
+    "tabBranding": "白标化",
+    "appName": "产品名称",
+    "appFavicon": "网站图标",
+    "uploadFavicon": "上传图标",
+    "tabModel": "模型",
+    "tabPrompt": "提示词",
+    "tabPlugins": "插件",
+    "tabSkills": "技能",
+    "apiEndpoint": "API 端点",
+    "apiKey": "API 密钥",
+    "model": "模型",
+    "systemPrompt": "系统提示词",
+    "noPlugins": "暂无已安装的插件",
+    "noSkills": "暂无已安装的技能",
+    "uploadPlugin": "上传插件 (.zip)",
+    "uploadSkill": "上传技能 (.zip)",
+    "authFailed": "验证失败"
+  },
+  "plugins": {
+    "title": "插件",
+    "available": "可用插件",
+    "call": "调用"
+  },
+  "server": {
+    "bannerTitle": "智能体服务",
+    "bannerPort": "端口：",
+    "bannerAdminKey": "管理员密钥："
+  },
+  "login": {
+    "title": "欢迎",
+    "subtitle": "输入用户名以继续",
+    "usernamePlaceholder": "用户名",
+    "submit": "继续"
+  }
+}
