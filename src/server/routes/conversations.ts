@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
-import { eq, and, desc } from 'drizzle-orm'
+import { eq, and, desc, gte } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 
 function getUserId(c: any): string {
@@ -71,4 +71,35 @@ conversationsRoute.patch('/:id', async (c) => {
 
   const conv = await db.select().from(conversations).where(eq(conversations.id, id)).get()
   return c.json({ conversation: conv })
+})
+
+// Revert from a specific message — delete this message and all subsequent ones
+conversationsRoute.delete('/:id/messages/:messageId', async (c) => {
+  const userId = getUserId(c)
+  if (!userId) return c.json({ error: 'Unauthorized' }, 401)
+
+  const convId = c.req.param('id')
+  const messageId = Number(c.req.param('messageId'))
+
+  // Verify conversation ownership
+  const conv = await db.select().from(conversations).where(and(eq(conversations.id, convId), eq(conversations.user_id, userId))).get()
+  if (!conv) return c.json({ error: 'Not found' }, 404)
+
+  // Verify message belongs to this conversation
+  const msg = await db.select().from(messages).where(and(eq(messages.id, messageId), eq(messages.conversation_id, convId))).get()
+  if (!msg) return c.json({ error: 'Message not found' }, 404)
+
+  // Delete this message and all messages created after it (same or later timestamp)
+  await db.delete(messages)
+    .where(and(
+      eq(messages.conversation_id, convId),
+      gte(messages.id, messageId),
+    ))
+    .run()
+
+  // Update conversation timestamp
+  const now = Math.floor(Date.now() / 1000)
+  await db.update(conversations).set({ updated_at: now }).where(eq(conversations.id, convId)).run()
+
+  return c.json({ success: true })
 })

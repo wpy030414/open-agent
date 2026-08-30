@@ -38,6 +38,7 @@ export async function getConfig(): Promise<AppConfig> {
   return {
     app_name: await getSetting('app_name', DEFAULT_APP_NAME),
     app_favicon: await getSetting('app_favicon', ''),
+    app_background: await getSetting('app_background', ''),
     api_endpoint: await getSetting('api_endpoint', env.OPENAI_BASE_URL),
     api_key: await getSetting('api_key', env.OPENAI_API_KEY),
     model: await getSetting('model', env.OPENAI_MODEL),

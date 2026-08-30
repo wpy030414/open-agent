@@ -29,9 +29,7 @@ adminRoute.use('/skills/*', adminAuthMiddleware)
 // Get current config
 adminRoute.get('/config', async (c) => {
   const config = await getConfig()
-  // Mask API key for safety
-  const masked = { ...config, api_key: config.api_key ? '***' + config.api_key.slice(-4) : '' }
-  return c.json(masked)
+  return c.json(config)
 })
 
 // Update config

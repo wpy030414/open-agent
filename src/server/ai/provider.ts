@@ -83,10 +83,17 @@ export async function* streamChatCompletion(
   const decoder = new TextDecoder()
   let buffer = ''
   const pendingToolCalls = new Map<number, PendingToolCall>()
+  let receivedDone = false
+  let receivedFinish = false
 
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
+    if (done) {
+      if (!receivedDone && !receivedFinish) {
+        throw new Error('Upstream API stream closed unexpectedly without [DONE] signal')
+      }
+      break
+    }
 
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split('\n')
@@ -96,7 +103,10 @@ export async function* streamChatCompletion(
       const trimmed = line.trim()
       if (!trimmed || !trimmed.startsWith('data: ')) continue
       const data = trimmed.slice(6)
-      if (data === '[DONE]') return
+      if (data === '[DONE]') {
+        receivedDone = true
+        return
+      }
 
       try {
         const json = JSON.parse(data)
@@ -137,6 +147,7 @@ export async function* streamChatCompletion(
 
         // Emit finish
         if (finishReason) {
+          receivedFinish = true
           if (pendingToolCalls.size > 0) {
             const calls = [...pendingToolCalls.values()]
               .sort((a, b) => a.index - b.index)

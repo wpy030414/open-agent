@@ -35,6 +35,7 @@ export interface ToolCall {
 export interface AppConfig {
   app_name: string
   app_favicon: string  // base64 data URL, empty = use default
+  app_background: string  // base64 data URL, empty = no custom background
   api_endpoint: string
   api_key: string
   model: string

@@ -39,6 +39,10 @@ chatRoute.post('/', async (c) => {
         stream.writeSSE({ data: JSON.stringify(msg), event: 'message' })
       } catch {
         aborted = true
+        const isTerminal = msg.type === 'done' || msg.type === 'error'
+        if (isTerminal) {
+          console.warn('Failed to send terminal event to client:', msg.type, '- stream already closed')
+        }
       }
     }
 

@@ -8,7 +8,7 @@ export const pluginsRoute = new Hono()
 // Public: get app name and favicon for white-label branding
 pluginsRoute.get('/app-name', async (c) => {
   const config = await getConfig()
-  return c.json({ app_name: config.app_name, app_favicon: config.app_favicon })
+  return c.json({ app_name: config.app_name, app_favicon: config.app_favicon, app_background: config.app_background })
 })
 
 // List available plugins (public — no auth needed for browsing)
