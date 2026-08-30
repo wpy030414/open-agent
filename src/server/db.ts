@@ -1,0 +1,71 @@
+import { createClient } from '@libsql/client'
+import { drizzle } from 'drizzle-orm/libsql'
+import * as schema from './schema.js'
+import path from 'path'
+import fs from 'fs'
+
+const dataDir = path.resolve('data')
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
+
+const dbPath = path.join(dataDir, 'open-agent.db')
+const client = createClient({ url: `file:${dbPath}` })
+
+// --- Migrations ---
+// Lightweight: CREATE IF NOT EXISTS won't add columns to existing DBs,
+// so new columns are ALTERed in when missing.
+async function migrate() {
+  // --- Pre-flight: add columns that older DBs may be missing ---
+  // These ALTERs must run BEFORE executeMultiple, because CREATE INDEX
+  // on a missing column would fail inside the batch.
+  const convRes = await client.execute('PRAGMA table_info(conversations)')
+  if (convRes.rows.length > 0) {
+    // Table exists — patch any new columns
+    const hasUserId = convRes.rows.some((r) => r.name === 'user_id')
+    if (!hasUserId) {
+      await client.execute("ALTER TABLE conversations ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
+    }
+  }
+
+  const msgRes = await client.execute('PRAGMA table_info(messages)')
+  if (msgRes.rows.length > 0) {
+    const hasSuggestions = msgRes.rows.some((r) => r.name === 'suggestions')
+    if (!hasSuggestions) {
+      await client.execute('ALTER TABLE messages ADD COLUMN suggestions TEXT')
+    }
+  }
+
+  // --- Main DDL (safe: IF NOT EXISTS on everything) ---
+  await client.executeMultiple(`
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL DEFAULT '新对话',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK(role IN ('user','assistant','system','tool')),
+      content TEXT NOT NULL DEFAULT '',
+      thinking TEXT,
+      tool_calls TEXT,
+      tool_call_id TEXT,
+      suggestions TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
+  `)
+}
+
+await migrate()
+
+export const db = drizzle(client, { schema })
