@@ -1,28 +1,58 @@
 {
-  "name": "yida-agent",
-  "version": "1.0.0",
-  "description": "AI 秘书 Web 原型 - 钉钉身份识别 + 宜搭数据 + Claude 智能问答",
+  "name": "open-agent",
+  "version": "0.1.0",
   "type": "module",
+  "private": true,
   "scripts": {
-    "serve": "node server/index.mjs",
-    "dev": "vite",
-    "build": "vite build"
+    "dev": "concurrently -k \"pnpm dev:server\" \"pnpm dev:client\"",
+    "dev:client": "vite",
+    "dev:server": "tsx watch src/server/index.ts",
+    "build": "pnpm build:client && pnpm build:server",
+    "build:client": "vite build",
+    "build:server": "tsup src/server/index.ts --format esm --dts --clean --outDir dist",
+    "start": "node dist/index.js"
   },
   "dependencies": {
-    "@material/material-color-utilities": "^0.3.0",
-    "@material/web": "^2.3.0",
-    "cors": "^2.8.5",
-    "dotenv": "^17.4.2",
-    "express": "^4.19.2",
+    "@hono/node-server": "^1.14.0",
+    "@hono/node-ws": "^1.1.0",
+    "@libsql/client": "^0.14.0",
+    "@radix-ui/react-collapsible": "^1.1.0",
+    "@radix-ui/react-dialog": "^1.1.0",
+    "@radix-ui/react-scroll-area": "^1.2.0",
+    "@radix-ui/react-slot": "^1.1.0",
+    "@radix-ui/react-tabs": "^1.1.0",
+    "@radix-ui/react-tooltip": "^1.1.0",
+    "adm-zip": "^0.6.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.0",
+    "dotenv": "^16.4.0",
+    "drizzle-orm": "^0.39.0",
+    "hono": "^4.7.0",
+    "i18next": "^26.4.0",
+    "jose": "^6.0.0",
+    "lucide-react": "^0.475.0",
     "mermaid": "^11.16.0",
-    "playwright": "^1.61.1",
-    "vue": "^3.5.13"
-  },
-  "optionalDependencies": {
-    "crypto": "^1.0.1"
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-i18next": "^17.0.12",
+    "react-markdown": "^9.0.0",
+    "rehype-highlight": "^7.0.0",
+    "remark-gfm": "^4.0.0",
+    "tailwind-merge": "^3.0.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.2.1",
-    "vite": "^5.3.1"
+    "@types/adm-zip": "^0.5.8",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.0",
+    "concurrently": "^9.1.0",
+    "drizzle-kit": "^0.30.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.1.0"
   }
 }
