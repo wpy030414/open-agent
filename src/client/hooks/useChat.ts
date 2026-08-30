@@ -4,12 +4,14 @@ import { api, getUser } from '../lib/api'
 import type { Conversation } from '@/shared/types'
 
 interface ChatMessage {
+  id?: number
   role: 'user' | 'assistant'
   content: string
   thinking?: string
   toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string }>
   suggestions?: string[]
   streaming?: boolean
+  created_at?: string
 }
 
 const MAX_RETRIES = 3
@@ -29,6 +31,64 @@ export function useChat() {
     api.listConversations()
       .then((res) => setConversations(res.conversations))
       .catch(console.error)
+  }, [])
+
+  // Restore conversation from URL hash on mount (#/c/{id})
+  useEffect(() => {
+    const match = window.location.hash.match(/^#\/c\/(.+)$/)
+    if (!match) return
+    const id = decodeURIComponent(match[1])
+    api.getConversation(id)
+      .then((res) => {
+        setActiveId(id)
+        setMessages(
+          res.messages.map((m) => ({
+            id: m.id,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            thinking: m.thinking || undefined,
+            toolCalls: m.tool_calls ? JSON.parse(m.tool_calls as any) : undefined,
+            suggestions: m.suggestions ? JSON.parse(m.suggestions as any) : undefined,
+          }))
+        )
+      })
+      .catch((err) => {
+        // Access denied or not found — clear hash, stay on initial page
+        console.error('Failed to restore conversation from URL:', err)
+        history.replaceState(null, '', window.location.pathname + window.location.search)
+      })
+  }, [])
+
+  // Sync active conversation when URL hash changes (browser back/forward)
+  useEffect(() => {
+    const onHashChange = () => {
+      const match = window.location.hash.match(/^#\/c\/(.+)$/)
+      const id = match ? decodeURIComponent(match[1]) : null
+      if (!id) {
+        setActiveId(null)
+        setMessages([])
+        return
+      }
+      api.getConversation(id)
+        .then((res) => {
+          setActiveId(id)
+          setMessages(
+            res.messages.map((m) => ({
+              id: m.id,
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              thinking: m.thinking || undefined,
+              toolCalls: m.tool_calls ? JSON.parse(m.tool_calls as any) : undefined,
+              suggestions: m.suggestions ? JSON.parse(m.suggestions as any) : undefined,
+            }))
+          )
+        })
+        .catch(() => {
+          history.replaceState(null, '', window.location.pathname + window.location.search)
+        })
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
   const refreshConversations = useCallback(() => {
@@ -93,6 +153,7 @@ export function useChat() {
         const decoder = new TextDecoder()
         let buffer = ''
         let receivedDone = false
+        let receivedTokens = false
         const IDLE_TIMEOUT = 60_000
         let idleTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -120,6 +181,7 @@ export function useChat() {
               try {
                 const msg = JSON.parse(data)
                 if (msg.type === 'conversation_id') convId = msg.id
+                if (msg.type === 'token') receivedTokens = true
                 if (msg.type === 'done' || msg.type === 'error') receivedDone = true
                 handleSSEEvent(msg)
               } catch {
@@ -130,10 +192,21 @@ export function useChat() {
 
           // Stream ended — check if we got a proper completion
           if (!receivedDone) {
-            // Stream closed prematurely without done/error event — treat as failure, retry
-            throw new Error('Stream ended without response')
+            // Check if we received any tokens — partial response is better than retry loop
+            if (receivedTokens) {
+              // We got some tokens but stream closed without done/error.
+              // Likely a transient network drop — treat as graceful close, don't retry
+              // (retrying would duplicate the message and waste tokens)
+              console.warn('Stream closed early but partial content received; keeping response')
+              updateLastMessage({ streaming: false })
+              done = true
+            } else {
+              // No content at all — this is a real failure, retry
+              throw new Error('Stream ended without response')
+            }
+          } else {
+            done = true
           }
-          done = true
         } finally {
           if (idleTimer) clearTimeout(idleTimer)
         }
@@ -167,6 +240,26 @@ export function useChat() {
     setLoading(false)
     abortRef.current = null
     refreshConversations()
+
+    // Re-fetch messages from server to get real IDs for locally-created messages
+    if (convId) {
+      try {
+        const res = await api.getConversation(convId)
+        setMessages(
+          res.messages.map((m) => ({
+            id: m.id,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            thinking: m.thinking || undefined,
+            toolCalls: m.tool_calls ? JSON.parse(m.tool_calls as any) : undefined,
+            suggestions: m.suggestions ? JSON.parse(m.suggestions as any) : undefined,
+          }))
+        )
+      } catch {
+        // Non-fatal — messages stay without IDs, revert buttons won't show on them
+      }
+    }
+
     // Safety net: ensure streaming is cleared
     setMessages((prev) => {
       const last = prev[prev.length - 1]
@@ -179,6 +272,13 @@ export function useChat() {
     switch (msg.type) {
       case 'conversation_id':
         setActiveId(msg.id)
+        // First message creates a new conversation — push its id to hash
+        if (msg.id) {
+          const newHash = `#/c/${encodeURIComponent(msg.id)}`
+          if (window.location.hash !== newHash) {
+            history.replaceState(null, '', newHash)
+          }
+        }
         break
 
       case 'token':
@@ -299,8 +399,14 @@ export function useChat() {
     try {
       const res = await api.getConversation(id)
       setActiveId(id)
+      // Sync URL hash
+      const newHash = `#/c/${encodeURIComponent(id)}`
+      if (window.location.hash !== newHash) {
+        history.pushState(null, '', newHash)
+      }
       setMessages(
         res.messages.map((m) => ({
+          id: m.id,
           role: m.role as 'user' | 'assistant',
           content: m.content,
           thinking: m.thinking || undefined,
@@ -310,12 +416,18 @@ export function useChat() {
       )
     } catch (err) {
       console.error('Failed to load conversation:', err)
+      // Access denied — clear hash, return to initial page
+      history.replaceState(null, '', window.location.pathname + window.location.search)
     }
   }, [])
 
   const createConversation = useCallback(() => {
     setActiveId(null)
     setMessages([])
+    // Clear hash
+    if (window.location.hash) {
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
   }, [])
 
   const deleteConversation = useCallback(async (id: string) => {
@@ -325,11 +437,67 @@ export function useChat() {
       if (activeId === id) {
         setActiveId(null)
         setMessages([])
+        // Clear hash since we deleted the active conversation
+        if (window.location.hash) {
+          history.replaceState(null, '', window.location.pathname + window.location.search)
+        }
       }
     } catch (err) {
       console.error('Failed to delete conversation:', err)
     }
   }, [activeId])
+
+  const renameConversation = useCallback(async (id: string, title: string) => {
+    try {
+      await api.renameConversation(id, title)
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title } : c))
+      )
+    } catch (err) {
+      console.error('Failed to rename conversation:', err)
+    }
+  }, [])
+
+  const exportConversation = useCallback(async (id: string) => {
+    try {
+      const res = await api.getConversation(id)
+      const lines = res.messages.map((m) => {
+        const role = m.role === 'user' ? '🧑 User' : '🤖 Assistant'
+        return `### ${role}\n${m.content}`
+      })
+      const title = res.conversation.title || 'conversation'
+      const body = `# ${title}\n\n${lines.join('\n\n---\n\n')}\n`
+      const blob = new Blob([body], { type: 'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${title.replace(/[\\/:*?"<>|]/g, '_')}.txt`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Failed to export conversation:', err)
+    }
+  }, [])
+
+  const revertMessage = useCallback(async (index: number) => {
+    if (!activeId) return null
+
+    const message = messages[index]
+    if (!message || !message.id) return null
+
+    try {
+      // Delete messages from server (this message and all subsequent)
+      await api.revertMessages(activeId, message.id)
+
+      // Update local state - remove this message and all after it
+      setMessages((prev) => prev.slice(0, index))
+
+      return message.content
+    } catch (err) {
+      console.error('Failed to revert message:', err)
+      return null
+    }
+  }, [activeId, messages])
 
   return {
     conversations,
@@ -339,9 +507,12 @@ export function useChat() {
     sendMessage,
     selectConversation,
     createConversation,
+    renameConversation,
     deleteConversation,
+    exportConversation,
     refreshConversations,
     cancel,
     callPlugin,
+    revertMessage,
   }
 }

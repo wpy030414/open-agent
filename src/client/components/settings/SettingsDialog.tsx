@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs'
 import { Input } from '../ui/input'
 import { Button } from '../ui/button'
 import { api } from '../../lib/api'
-import { Upload } from 'lucide-react'
+import { Upload, Eye, EyeOff } from 'lucide-react'
 import type { useAdmin } from '../../hooks/useAdmin'
 
 interface SettingsDialogProps {
@@ -91,6 +91,7 @@ function BrandingSettings({ token }: { token: string }) {
   const [config, setConfig] = useState<any>(null)
   const [saving, setSaving] = useState(false)
   const faviconInputRef = useRef<HTMLInputElement>(null)
+  const backgroundInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     api.getConfig(token).then(setConfig).catch(console.error)
@@ -99,7 +100,11 @@ function BrandingSettings({ token }: { token: string }) {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await api.updateConfig(token, { app_name: config.app_name, app_favicon: config.app_favicon })
+      await api.updateConfig(token, {
+        app_name: config.app_name,
+        app_favicon: config.app_favicon,
+        app_background: config.app_background,
+      })
     } catch (err) {
       console.error(err)
     }
@@ -112,6 +117,16 @@ function BrandingSettings({ token }: { token: string }) {
     const reader = new FileReader()
     reader.onload = () => {
       setConfig({ ...config, app_favicon: reader.result as string })
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleBackgroundChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      setConfig({ ...config, app_background: reader.result as string })
     }
     reader.readAsDataURL(file)
   }
@@ -164,6 +179,49 @@ function BrandingSettings({ token }: { token: string }) {
           )}
         </div>
       </div>
+      <div>
+        <label className="text-sm font-medium">{t('settings.appBackground')}</label>
+        <div className="flex items-center gap-4 mt-1">
+          {config.app_background ? (
+            <div
+              className="h-12 w-12 rounded border"
+              style={{
+                backgroundImage: `url(${config.app_background})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                opacity: 0.2,
+              }}
+            />
+          ) : (
+            <div className="h-12 w-12 rounded bg-muted flex items-center justify-center text-xs">
+              无
+            </div>
+          )}
+          <input
+            ref={backgroundInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleBackgroundChange}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => backgroundInputRef.current?.click()}
+          >
+            {t('settings.uploadBackground')}
+          </Button>
+          {config.app_background && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfig({ ...config, app_background: '' })}
+            >
+              {t('common.remove')}
+            </Button>
+          )}
+        </div>
+      </div>
       <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>
   )
@@ -174,6 +232,7 @@ function ModelSettings({ token }: { token: string }) {
   const { t } = useTranslation()
   const [config, setConfig] = useState<any>(null)
   const [saving, setSaving] = useState(false)
+  const [showApiKey, setShowApiKey] = useState(false)
 
   useEffect(() => {
     api.getConfig(token).then(setConfig).catch(console.error)
@@ -199,7 +258,21 @@ function ModelSettings({ token }: { token: string }) {
       </div>
       <div>
         <label className="text-sm font-medium">{t('settings.apiKey')}</label>
-        <Input type="password" value={config.api_key || ''} onChange={(e) => setConfig({ ...config, api_key: e.target.value })} className="mt-1" />
+        <div className="relative mt-1">
+          <Input
+            type={showApiKey ? 'text' : 'password'}
+            value={config.api_key || ''}
+            onChange={(e) => setConfig({ ...config, api_key: e.target.value })}
+            className="pr-10"
+          />
+          <button
+            type="button"
+            onClick={() => setShowApiKey(!showApiKey)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
       <div>
         <label className="text-sm font-medium">{t('settings.model')}</label>

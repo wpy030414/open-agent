@@ -1,6 +1,8 @@
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
-import { Plus, MessageSquare, Trash2, Settings, User } from 'lucide-react'
+import { Plus, MessageSquare, MoreVertical, Download, Trash2, Pencil, Settings, User } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation } from '@/shared/types'
 
@@ -9,14 +11,76 @@ interface SidebarProps {
   activeId: string | null
   onSelect: (id: string) => void
   onNew: () => void
+  onRename: (id: string, title: string) => void
   onDelete: (id: string) => void
+  onExport: (id: string) => void
   onMenuClick: () => void
   appName: string
   currentUser: string
 }
 
-export function Sidebar({ conversations, activeId, onSelect, onNew, onDelete, onMenuClick, appName, currentUser }: SidebarProps) {
+interface MenuState {
+  convId: string
+  anchorRect: DOMRect
+}
+
+export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, onDelete, onExport, onMenuClick, appName, currentUser }: SidebarProps) {
   const { t } = useTranslation()
+  const [menu, setMenu] = useState<MenuState | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  const closeMenu = useCallback(() => setMenu(null), [])
+
+  const startRename = useCallback((conv: Conversation) => {
+    setRenamingId(conv.id)
+    setRenameValue(conv.title)
+    closeMenu()
+    // Focus input on next render
+    requestAnimationFrame(() => inputRef.current?.select())
+  }, [closeMenu])
+
+  const commitRename = useCallback(() => {
+    if (renamingId) {
+      const trimmed = renameValue.trim()
+      if (trimmed) {
+        onRename(renamingId, trimmed)
+      }
+    }
+    setRenamingId(null)
+    setRenameValue('')
+  }, [renamingId, renameValue, onRename])
+
+  const cancelRename = useCallback(() => {
+    setRenamingId(null)
+    setRenameValue('')
+  }, [])
+
+  // Close on outside click / scroll / resize / Escape
+  useEffect(() => {
+    if (!menu) return
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) closeMenu()
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu() }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', closeMenu)
+    // Also close when the scroll area scrolls (parent reflows)
+    const scroller = document.querySelector('[data-radix-scroll-area-viewport]')
+    scroller?.addEventListener('scroll', closeMenu)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', closeMenu)
+      scroller?.removeEventListener('scroll', closeMenu)
+    }
+  }, [menu, closeMenu])
+
   return (
     <div className="flex flex-col h-full w-72 bg-card">
       {/* App name */}
@@ -50,21 +114,39 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onDelete, on
                   ? 'bg-accent text-accent-foreground'
                   : 'hover:bg-accent/50'
               }`}
-              onClick={() => onSelect(conv.id)}
+              onClick={() => { if (renamingId !== conv.id) onSelect(conv.id) }}
             >
               <MessageSquare className="h-4 w-4 flex-shrink-0" />
-              <span className="flex-1 text-sm truncate">{conv.title}</span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onDelete(conv.id)
-                }}
-              >
-                <Trash2 className="h-3 w-3" />
-              </Button>
+              {renamingId === conv.id ? (
+                <input
+                  ref={inputRef}
+                  className="flex-1 text-sm bg-background border rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-ring"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename()
+                    if (e.key === 'Escape') cancelRename()
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span className="flex-1 text-sm truncate">{conv.title}</span>
+              )}
+              {renamingId !== conv.id && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                    setMenu((prev) => prev?.convId === conv.id ? null : { convId: conv.id, anchorRect: rect })
+                  }}
+                >
+                  <MoreVertical className="h-3 w-3" />
+                </Button>
+              )}
             </div>
           ))}
           {conversations.length === 0 && (
@@ -72,6 +154,44 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onDelete, on
           )}
         </div>
       </ScrollArea>
+
+      {/* Context menu (portal to escape scroll/overflow) */}
+      {menu && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[9999] w-40 rounded-md border bg-popover p-1 shadow-md animate-in fade-in-0 zoom-in-95"
+          style={{
+            top: menu.anchorRect.bottom + 4,
+            left: Math.max(8, menu.anchorRect.right - 160),
+          }}
+        >
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+            onClick={() => {
+              const conv = conversations.find((c) => c.id === menu.convId)
+              if (conv) startRename(conv)
+            }}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {t('sidebar.rename')}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/60 transition-colors"
+            onClick={() => { onExport(menu.convId); closeMenu() }}
+          >
+            <Download className="h-3.5 w-3.5" />
+            {t('sidebar.saveAsTxt')}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+            onClick={() => { onDelete(menu.convId); closeMenu() }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t('sidebar.delete')}
+          </button>
+        </div>,
+        document.body,
+      )}
 
       {/* Bottom bar — user info + settings */}
       <div className="border-t flex items-center justify-between px-3" style={{ height: '60px' }}>

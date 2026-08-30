@@ -25,12 +25,17 @@
     "unknownError": "Unknown error",
     "errorMessage": "Error: {{message}}",
     "connectionTimeout": "Connection lost, please retry",
-    "reconnecting": "Reconnecting..."
+    "reconnecting": "Reconnecting...",
+    "revert": "Revert",
+    "revertConfirmAction": "Yes, revert"
   },
   "sidebar": {
     "newChat": "New Chat",
     "noConversations": "No conversations yet",
-    "recent": "Recent"
+    "recent": "Recent",
+    "rename": "Rename",
+    "saveAsTxt": "Save as TXT",
+    "delete": "Delete"
   },
   "menu": {
     "title": "Settings",
@@ -54,6 +59,8 @@
     "appName": "App Name",
     "appFavicon": "Favicon",
     "uploadFavicon": "Upload Favicon",
+    "uploadBackground": "Upload Background",
+    "appBackground": "Chat Background",
     "tabModel": "Model",
     "tabPrompt": "Prompt",
     "tabPlugins": "Plugins",

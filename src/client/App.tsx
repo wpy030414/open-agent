@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChat } from './hooks/useChat'
 import { useAdmin } from './hooks/useAdmin'
@@ -20,6 +20,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [appName, setAppName] = useState('Open Agent')
+  const [backgroundImage, setBackgroundImage] = useState('')
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -49,6 +50,9 @@ export function App() {
         const link = document.getElementById('favicon') as HTMLLinkElement | null
         if (link) link.href = r.app_favicon
       }
+      if (r.app_background) {
+        setBackgroundImage(r.app_background)
+      }
     }).catch(() => {})
   }, [])
 
@@ -61,6 +65,7 @@ export function App() {
           const link = document.getElementById('favicon') as HTMLLinkElement | null
           if (link) link.href = r.app_favicon
         }
+        setBackgroundImage(r.app_background || '')
       }).catch(() => {})
     }
   }, [settingsOpen])
@@ -81,6 +86,9 @@ export function App() {
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [])
 
+  // 100dvh in globals.css + interactive-widget=resizes-content in viewport meta
+  // already handle the virtual keyboard correctly — no JS needed.
+
   const handleLanguageChange = (lang: string) => {
     i18n.changeLanguage(lang)
   }
@@ -97,7 +105,7 @@ export function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-full overflow-hidden bg-background">
       {/* Sidebar */}
       <div className={`
         w-72 flex-shrink-0 border-r
@@ -110,7 +118,9 @@ export function App() {
           activeId={chat.activeId}
           onSelect={chat.selectConversation}
           onNew={chat.createConversation}
+          onRename={chat.renameConversation}
           onDelete={chat.deleteConversation}
+          onExport={chat.exportConversation}
           onMenuClick={() => setMenuOpen(true)}
           appName={appName}
           currentUser={currentUser}
@@ -143,7 +153,9 @@ export function App() {
           loading={chat.loading}
           onSend={chat.sendMessage}
           onCancel={chat.cancel}
+          onRevert={chat.revertMessage}
           onPluginCall={chat.callPlugin}
+          backgroundImage={backgroundImage}
         />
       </div>
 

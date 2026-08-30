@@ -1,16 +1,35 @@
-import { useState, useRef, KeyboardEvent } from 'react'
+import { useState, useRef, useEffect, KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Send } from 'lucide-react'
 
 interface InputBarProps {
   onSend: (text: string) => void
   disabled?: boolean
+  /** External value to pre-fill the textarea (e.g. after revert) */
+  externalValue?: string
+  onExternalValueConsumed?: () => void
 }
 
-export function InputBar({ onSend, disabled }: InputBarProps) {
+export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // When externalValue changes, fill the textarea and focus it
+  useEffect(() => {
+    if (externalValue !== undefined && externalValue !== '') {
+      setText(externalValue)
+      onExternalValueConsumed?.()
+      // Auto-resize
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto'
+          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
+          textareaRef.current.focus()
+        }
+      })
+    }
+  }, [externalValue, onExternalValueConsumed])
 
   const handleSend = () => {
     const trimmed = text.trim()

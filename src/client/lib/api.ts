@@ -31,10 +31,11 @@ export const api = {
   createConversation: (title?: string) => request<{ conversation: import('@/shared/types').Conversation }>('/api/conversations', { method: 'POST', body: JSON.stringify({ title }) }),
   deleteConversation: (id: string) => request<{ success: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   renameConversation: (id: string, title: string) => request<{ conversation: import('@/shared/types').Conversation }>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  revertMessages: (conversationId: string, messageId: number) => request<{ success: boolean }>(`/api/conversations/${conversationId}/messages/${messageId}`, { method: 'DELETE' }),
 
   // Plugins
   listPlugins: () => request<{ plugins: Array<{ name: string; version: string; description: string; tools: Array<{ name: string; description: string }> }> }>('/api/plugins'),
-  getAppName: () => request<{ app_name: string; app_favicon: string }>('/api/plugins/app-name'),
+  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string }>('/api/plugins/app-name'),
 
   // Admin
   adminAuth: (key: string) => request<{ token: string; expires_at: number }>('/api/admin/auth', { method: 'POST', body: JSON.stringify({ key }) }),

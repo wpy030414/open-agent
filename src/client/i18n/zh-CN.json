@@ -25,12 +25,17 @@
     "unknownError": "未知错误",
     "errorMessage": "错误：{{message}}",
     "connectionTimeout": "连接超时，请重试",
-    "reconnecting": "正在重新连接..."
+    "reconnecting": "正在重新连接...",
+    "revert": "回退",
+    "revertConfirmAction": "确认回退"
   },
   "sidebar": {
     "newChat": "新对话",
     "noConversations": "暂无对话",
-    "recent": "最近"
+    "recent": "最近",
+    "rename": "重命名",
+    "saveAsTxt": "另存为 TXT",
+    "delete": "删除"
   },
   "menu": {
     "title": "设置",
@@ -54,6 +59,8 @@
     "appName": "产品名称",
     "appFavicon": "网站图标",
     "uploadFavicon": "上传图标",
+    "uploadBackground": "上传背景图",
+    "appBackground": "聊天背景图片",
     "tabModel": "模型",
     "tabPrompt": "提示词",
     "tabPlugins": "插件",
