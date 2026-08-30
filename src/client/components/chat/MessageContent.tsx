@@ -1,20 +1,52 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 interface MessageContentProps {
   content: string
+  streaming?: boolean
 }
 
-export function MessageContent({ content }: MessageContentProps) {
+const STREAM_THROTTLE_MS = 120
+
+export function MessageContent({ content, streaming }: MessageContentProps) {
+  // Throttle content updates during streaming to avoid re-parsing markdown
+  // on every single token (which causes garbled rendering)
+  const [renderedContent, setRenderedContent] = useState(content)
+
+  useEffect(() => {
+    if (!streaming) {
+      // Not streaming — show final content immediately
+      setRenderedContent(content)
+      return
+    }
+
+    // During streaming: throttle updates
+    const timer = setTimeout(() => {
+      setRenderedContent(content)
+    }, STREAM_THROTTLE_MS)
+
+    return () => clearTimeout(timer)
+  }, [content, streaming])
+
+  // Stabilize the markdown output to avoid unnecessary re-renders
+  const safeContent = useMemo(
+    () => sanitizeIncompleteMarkdown(renderedContent),
+    [renderedContent],
+  )
+
   // Split content by mermaid code blocks
-  const parts = content.split(/(```mermaid[\s\S]*?```)/g)
+  const parts = safeContent.split(/(```mermaid[\s\S]*?```)/g)
 
   return (
     <div className="prose prose-sm max-w-none dark:prose-invert">
       {parts.map((part, idx) => {
         if (part.startsWith('```mermaid')) {
+          // Don't render mermaid while streaming (incomplete chart syntax)
+          if (streaming) {
+            return <pre key={idx} className="text-xs bg-muted p-2 rounded">{part}</pre>
+          }
           const chart = part.replace(/```mermaid\n?/, '').replace(/\n?```$/, '')
           return <MermaidBlock key={idx} chart={chart} />
         }
@@ -22,6 +54,51 @@ export function MessageContent({ content }: MessageContentProps) {
       })}
     </div>
   )
+}
+
+/**
+ * Fix incomplete markdown that would render as garbled text during streaming.
+ * - Close unclosed code fences
+ * - Balance inline formatting markers
+ * - Remove trailing partial markdown constructs
+ */
+function sanitizeIncompleteMarkdown(text: string): string {
+  if (!text) return text
+
+  let result = text
+
+  // Fix unclosed code fences: if odd number of ``` lines, add closing fence
+  const fenceCount = (result.match(/^```/gm) || []).length
+  if (fenceCount % 2 !== 0) {
+    result += '\n```'
+  }
+
+  // Fix unclosed inline code (single backtick)
+  const backtickCount = (result.match(/(?<!`)`(?!`)/g) || []).length
+  if (backtickCount % 2 !== 0) {
+    result += '`'
+  }
+
+  // Balance bold markers (**) — if odd count, close with **
+  const boldCount = (result.match(/\*\*/g) || []).length
+  if (boldCount % 2 !== 0) {
+    result += '**'
+  }
+
+  // Balance italic markers (single *) — count non-bold asterisks
+  // Simple heuristic: if total standalone * is odd, add closing *
+  const italicCount = (result.match(/(?<!\*)\*(?!\*)/g) || []).length
+  if (italicCount % 2 !== 0) {
+    result += '*'
+  }
+
+  // Remove trailing partial link/image syntax: [... or ![...
+  result = result.replace(/\!?\[[^\]]*$/, '')
+
+  // Remove trailing table row without closing
+  // (incomplete | table | rows | can crash the parser)
+
+  return result
 }
 
 function MermaidBlock({ chart }: { chart: string }) {

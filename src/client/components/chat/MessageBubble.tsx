@@ -1,8 +1,11 @@
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { MessageContent } from './MessageContent'
 import { ThinkingBlock } from './ThinkingBlock'
-import { User, Bot } from 'lucide-react'
+import { User, Bot, Undo2, Check, X } from 'lucide-react'
 
 interface ChatMessage {
+  id?: number
   role: 'user' | 'assistant'
   content: string
   thinking?: string
@@ -16,13 +19,17 @@ interface MessageBubbleProps {
   onSuggestion?: (text: string) => void
   /** Only the last assistant message should show its suggestion chips */
   showSuggestions?: boolean
+  /** Called when user clicks revert button on a user message */
+  onRevert?: () => void
 }
 
-export function MessageBubble({ message, onSuggestion, showSuggestions }: MessageBubbleProps) {
+export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert }: MessageBubbleProps) {
+  const { t } = useTranslation()
   const isUser = message.role === 'user'
+  const [confirmingRevert, setConfirmingRevert] = useState(false)
 
   return (
-    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
+    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''} group`}>
       {/* Avatar */}
       <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
         isUser ? 'bg-primary text-primary-foreground' : 'bg-secondary'
@@ -30,50 +37,91 @@ export function MessageBubble({ message, onSuggestion, showSuggestions }: Messag
         {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
       </div>
 
-      {/* Content */}
-      <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
-        {/* Thinking block */}
-        {message.thinking && <ThinkingBlock content={message.thinking} done={!message.streaming} />}
+      {/* Content wrapper — groups content column + revert row as one flex item */}
+      <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-row-reverse gap-2' : ''}`}>
+        {/* Content column */}
+        <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
+          {/* Thinking block */}
+          {message.thinking && <ThinkingBlock content={message.thinking} done={!message.streaming} />}
 
-        {/* Tool calls */}
-        {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="mb-2 space-y-1">
-            {message.toolCalls.map((tc, idx) => (
-              <div key={idx} className="text-xs bg-muted rounded-md px-3 py-1.5">
-                <span className="font-medium">🔧 {tc.name}</span>
-                {tc.result && <span className="text-muted-foreground ml-2">→ {tc.result}</span>}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Message content */}
-        <div className={`inline-block rounded-lg px-4 py-2 ${
-          isUser ? 'bg-primary text-primary-foreground' : 'bg-card border'
-        }`}>
-          {message.streaming && !message.content ? (
-            <div className="flex gap-1">
-              <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          {/* Tool calls */}
+          {message.toolCalls && message.toolCalls.length > 0 && (
+            <div className="mb-2 space-y-1">
+              {message.toolCalls.map((tc, idx) => (
+                <div key={idx} className="text-xs bg-muted rounded-md px-3 py-1.5">
+                  <span className="font-medium">🔧 {tc.name}</span>
+                  {tc.result && <span className="text-muted-foreground ml-2">→ {tc.result}</span>}
+                </div>
+              ))}
             </div>
-          ) : (
-            <MessageContent content={message.content} />
+          )}
+
+          {/* Message content */}
+          <div className={`inline-block rounded-lg px-4 py-2 ${
+            isUser ? 'bg-primary text-primary-foreground text-left' : 'bg-card border'
+          }`}>
+            {message.streaming && !message.content ? (
+              <div className="flex gap-1">
+                <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            ) : (
+              <MessageContent content={message.content} streaming={message.streaming} />
+            )}
+          </div>
+
+          {/* Suggestions — only on the last assistant message */}
+          {showSuggestions && message.suggestions && message.suggestions.length > 0 && (
+            <div className={`flex flex-wrap gap-2 mt-2 ${isUser ? 'justify-end' : ''}`}>
+              {message.suggestions.map((s, idx) => (
+                <button
+                  key={idx}
+                  className="suggestion-chip"
+                  onClick={() => onSuggestion?.(s)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           )}
         </div>
 
-        {/* Suggestions — only on the last assistant message */}
-        {showSuggestions && message.suggestions && message.suggestions.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {message.suggestions.map((s, idx) => (
+        {/* Revert button — user messages only, positioned on the visual left */}
+        {isUser && message.id && onRevert && (
+          <div className="flex-shrink-0 flex items-center">
+            {confirmingRevert ? (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    setConfirmingRevert(false)
+                    onRevert()
+                  }}
+                  className="h-7 px-2 text-xs rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors inline-flex items-center gap-1"
+                  title={t('chat.revertConfirmAction')}
+                >
+                  <Check className="h-3 w-3" />
+                  {t('chat.revertConfirmAction')}
+                </button>
+                <button
+                  onClick={() => setConfirmingRevert(false)}
+                  className="h-7 px-2 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors inline-flex items-center gap-1"
+                  title={t('common.cancel')}
+                >
+                  <X className="h-3 w-3" />
+                  {t('common.cancel')}
+                </button>
+              </div>
+            ) : (
               <button
-                key={idx}
-                className="suggestion-chip"
-                onClick={() => onSuggestion?.(s)}
+                onClick={() => setConfirmingRevert(true)}
+                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors inline-flex items-center gap-1"
+                title={t('chat.revert')}
               >
-                {s}
+                <Undo2 className="h-3 w-3" />
+                {t('chat.revert')}
               </button>
-            ))}
+            )}
           </div>
         )}
       </div>
