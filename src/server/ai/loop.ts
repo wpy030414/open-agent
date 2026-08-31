@@ -221,10 +221,13 @@ function parseSuggestions(text: string): { reply: string; suggestions: string[] 
   // body (e.g. when restating the format example from the system prompt).
   const fenceIdx = text.lastIndexOf(SUGGESTIONS_FENCE)
   if (fenceIdx === -1) {
-    return { reply: text.trim(), suggestions: [] }
+    // Only trim trailing whitespace — preserve leading characters to avoid
+    // swallowing the first token when the reply is used to overwrite the
+    // streamed content in the client's done handler.
+    return { reply: text.trimEnd(), suggestions: [] }
   }
 
-  const reply = text.slice(0, fenceIdx).trim()
+  const reply = text.slice(0, fenceIdx).trimEnd()
   const afterFence = text.slice(fenceIdx + SUGGESTIONS_FENCE.length)
   const closeFence = afterFence.indexOf('```')
   const block = closeFence !== -1 ? afterFence.slice(0, closeFence) : afterFence

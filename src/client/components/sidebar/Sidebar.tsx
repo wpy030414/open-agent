@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { ScrollArea } from '../ui/scroll-area'
 import { Button } from '../ui/button'
 import { Plus, MessageSquare, MoreVertical, Download, Trash2, Pencil, Settings, User } from 'lucide-react'
+import { Github } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Conversation } from '@/shared/types'
 
@@ -83,9 +84,17 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, on
 
   return (
     <div className="flex flex-col h-full w-72 bg-card">
-      {/* App name */}
-      <div className="flex items-center px-4 border-b" style={{ height: '60px' }}>
+      {/* App name + GitHub */}
+      <div className="flex items-center justify-between px-4 border-b" style={{ height: '60px' }}>
         <h1 className="text-lg font-semibold">{appName}</h1>
+        <a
+          href="https://github.com/wpy030414/open-agent"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+        >
+          <Github className="h-4 w-4" />
+        </a>
       </div>
 
       {/* New chat button */}
@@ -201,7 +210,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, on
         </div>
         <button
           onClick={onMenuClick}
-          className="p-2 rounded-md text-sm hover:bg-accent/50 transition-colors"
+          className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-accent/50 transition-colors"
         >
           <Settings className="h-4 w-4 text-muted-foreground" />
         </button>
