@@ -37,7 +37,7 @@ app.route('/api/upload', uploadRoute)
 app.route('/api/user', userRoute)
 
 // Static files (production build only)
-const clientDist = path.resolve('dist/client')
+const clientDist = 'dist/client'
 if (fs.existsSync(path.join(clientDist, 'index.html'))) {
   app.use('/assets/*', serveStatic({ root: clientDist }))
   app.get('*', serveStatic({ root: clientDist, path: 'index.html' }))
