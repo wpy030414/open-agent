@@ -21,7 +21,7 @@
 
 单进程全栈 TypeScript 应用：
 
-- **前端**：React 18 + shadcn/ui（Radix 原语 + Tailwind CSS 3.4），Vite 6 构建为静态文件，由 Hono 在生产模式下托管
+- **前端**：React 18 + shadcn/ui（Radix 原语 + Tailwind CSS 3.4），Vite 8（Rolldown 打包）构建为静态文件，由 Hono 在生产模式下托管
 - **后端**：Hono 4（Node.js），SSE 用于实时聊天流，REST API 用于 CRUD
 - **数据库**：SQLite（@libsql/client + Drizzle ORM）—— 单文件 `data/open-agent.db`，无需外部数据库
 - **AI**：OpenAI 兼容的 Chat Completions API，支持流式输出和 function calling

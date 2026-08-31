@@ -138,7 +138,7 @@ pnpm start
 
 ## 技术栈
 
-- **前端**：React 18 + shadcn/ui（Radix 原语 + Tailwind CSS）+ Vite 6
+- **前端**：React 18 + shadcn/ui（Radix 原语 + Tailwind CSS）+ Vite 8（Rolldown）
 - **后端**：Hono 4 + @libsql/client + Drizzle ORM
 - **实时通信**：SSE（Server-Sent Events）
 - **AI**：OpenAI 兼容的 Chat Completions API（流式 + function calling）

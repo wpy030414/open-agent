@@ -184,3 +184,25 @@
 **影响**：
 - 用户端最后几个字符会有轻微延迟（可忽略）
 - 代码中有详细注释说明此策略
+
+---
+
+## D11：Vite 8（Rolldown）与构建产物目录分离
+
+**日期**：2026-08-31
+
+**背景**：升级到 Vite 8 后，其默认打包器由 Rollup + esbuild 换成 Rolldown + Oxc，CSS 压缩改用 Lightning CSS。同时排查发现 `pnpm build` 产出的 `dist/client` 为空。
+
+**决策**：
+1. 升级 `vite` → `^8.2.2`、`@vitejs/plugin-react` → `^6.1.1`（v6 改用 Oxc 做 React Refresh，不再依赖 Babel）。
+2. `build` 脚本顺序由 `build:client && build:server` 改为 `build:server && build:client`。
+
+**原因**：
+- `build:server` 的 `tsup --clean --outDir dist` 会清空整个 `dist`，客户端先构建就会被一并铲掉；把服务端放到前面、客户端最后写入，即可在同一 `dist` 下共存，无需改动 `dist/index.js`、`dist/client` 等既有路径约定与文档。
+- 该缺陷早于本次升级存在于 `build` 脚本中，并非 Vite 8 引入。
+- 项目未使用 `rollupOptions` / `esbuild` / `manualChunks` / `import.meta` 等受破坏性变更影响的配置，故无需引入 `rolldownOptions` 改写；仅将 `vite.config.ts` 中的 `__dirname` 改为 `import.meta.dirname`，以消除面向 `configLoader: 'native'` 的弃用告警。
+
+**影响**：
+- 客户端构建耗时由约 11.9s 降至约 1.05s（含进程启动的完整命令由 11.9s 降至 2.1s）。
+- 生产模式静态托管（`/`、`*.css`、`*.js`）与开发模式 HMR、React Refresh 边界注入均已实测通过；`tsc --noEmit` 无错误。
+- 客户端 chunk 体积告警仍存在（mermaid/cytoscape 等），属既有问题，未在本次改动范围内。
