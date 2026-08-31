@@ -41,6 +41,8 @@ export async function runChatLoop(
 
     const messages = [...baseMessages, ...toolMessages]
     let fullText = ''
+    let pending = '' // withhold buffer for suggestions fence protection
+    let suggestionsSeen = false // latch: once the fence is seen, hide everything after it
     let finishReason = ''
     let pendingCalls: Array<{ id: string; name: string; arguments: string }> = []
 
@@ -52,32 +54,33 @@ export async function runChatLoop(
         switch (event.type) {
           case 'token': {
             // Suggestions fence withholding.
-            // NOTE: once past the fence we must KEEP accumulating fullText
-            // (but not emit), otherwise suggestions content arriving in a later
-            // chunk would be dropped and parseSuggestions would see an empty block.
-            const idx = fullText.indexOf(SUGGESTIONS_FENCE)
-            if (idx !== -1) {
-              fullText += event.text || ''
+            // fullText must ALWAYS accumulate raw tokens (parseSuggestions reads
+            // the fence out of it); the latch suppresses client emission after
+            // the fence so suggestion lines never leak into the visible reply.
+            const token = event.text || ''
+            fullText += token
+
+            if (suggestionsSeen) break
+
+            // Keep a rolling buffer of the last FENCE-length chars un-emitted so a
+            // fence split across token chunks is still detected before any of it ships.
+            pending += token
+            const fenceIdx = pending.indexOf(SUGGESTIONS_FENCE)
+            if (fenceIdx !== -1) {
+              suggestionsSeen = true
+              const beforeFence = pending.slice(0, fenceIdx)
+              if (beforeFence) send({ type: 'token', text: beforeFence })
+              pending = ''
               break
             }
-            // Check if new text would cross the fence
-            const newText = fullText + (event.text || '')
-            const fenceIdx = newText.indexOf(SUGGESTIONS_FENCE)
-            if (fenceIdx !== -1) {
-              // Emit only up to the fence
-              const safe = newText.slice(0, fenceIdx)
-              const toSend = safe.slice(fullText.length)
-              if (toSend) send({ type: 'token', text: toSend })
-            } else {
-              // Safe margin: withhold last SUGGESTIONS_FENCE.length chars
-              const combined = fullText + (event.text || '')
-              if (combined.length > SUGGESTIONS_FENCE.length) {
-                const safeLen = combined.length - SUGGESTIONS_FENCE.length
-                const toSend = combined.slice(fullText.length, safeLen)
-                if (toSend) send({ type: 'token', text: toSend })
-              }
+
+            // No fence yet — keep last SUGGESTIONS_FENCE.length chars withheld
+            if (pending.length > SUGGESTIONS_FENCE.length) {
+              const safeLen = pending.length - SUGGESTIONS_FENCE.length
+              const toSend = pending.slice(0, safeLen)
+              send({ type: 'token', text: toSend })
+              pending = pending.slice(safeLen)
             }
-            fullText += event.text || ''
             break
           }
           case 'thinking':
@@ -146,6 +149,18 @@ export async function runChatLoop(
 
     // Final answer — parse suggestions
     const { reply, suggestions } = parseSuggestions(fullText)
+
+    // Flush pending buffer (last SUGGESTIONS_FENCE.length chars withheld during streaming)
+    if (!signal?.aborted && pending.length > 0) {
+      const fenceIdx = pending.indexOf(SUGGESTIONS_FENCE)
+      if (fenceIdx > 0) {
+        send({ type: 'token', text: pending.slice(0, fenceIdx) })
+      } else if (fenceIdx === -1) {
+        send({ type: 'token', text: pending })
+      }
+      pending = ''
+    }
+
     send({ type: 'done', reply, suggestions })
     return { reply, suggestions, thinking: fullThinking }
   }
@@ -193,7 +208,10 @@ function buildSystemPrompt(config: AppConfig): string {
 }
 
 function parseSuggestions(text: string): { reply: string; suggestions: string[] } {
-  const fenceIdx = text.indexOf(SUGGESTIONS_FENCE)
+  // Use lastIndexOf so we always match the ACTUAL trailing suggestions block,
+  // not a ````suggestions` literal the model may have echoed inside the reply
+  // body (e.g. when restating the format example from the system prompt).
+  const fenceIdx = text.lastIndexOf(SUGGESTIONS_FENCE)
   if (fenceIdx === -1) {
     return { reply: text.trim(), suggestions: [] }
   }
