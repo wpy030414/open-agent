@@ -43,13 +43,15 @@ export async function getConfig(): Promise<AppConfig> {
     api_key: await getSetting('api_key', env.OPENAI_API_KEY),
     model: await getSetting('model', env.OPENAI_MODEL),
     system_prompt: await getSetting('system_prompt', DEFAULT_SYSTEM_PROMPT),
+    support_attachments: (await getSetting('support_attachments', 'false')) === 'true',
   }
 }
 
 export async function updateConfig(partial: Partial<AppConfig>): Promise<AppConfig> {
   for (const [key, value] of Object.entries(partial)) {
     if (value !== undefined) {
-      await setSetting(key, value)
+      const stored = key === 'support_attachments' ? (value ? 'true' : 'false') : value
+      await setSetting(key, stored as string)
     }
   }
   return getConfig()

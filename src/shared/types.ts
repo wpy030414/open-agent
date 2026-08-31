@@ -48,6 +48,7 @@ export interface AppConfig {
   api_key: string
   model: string
   system_prompt: string
+  support_attachments: boolean
 }
 
 // ---- Plugin ----
@@ -104,6 +105,23 @@ export type ServerMessage =
 export interface AdminAuthResponse {
   token: string
   expires_at: number
+}
+
+// ---- Admin Statistics ----
+
+export interface AdminStats {
+  total_users: number
+  total_conversations: number
+  total_messages: number
+}
+
+export interface AdminConversationRow {
+  id: string
+  user_id: string
+  title: string
+  created_at: number
+  updated_at: number
+  message_count: number
 }
 
 // ---- API Responses ----

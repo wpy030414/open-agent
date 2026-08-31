@@ -1,13 +1,7 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Brain, Paperclip, X, Upload } from 'lucide-react'
-
-interface Attachment {
-  url: string
-  name: string
-  size: number
-  type: string
-}
+import { getToken } from '../../lib/api'
 
 interface Attachment {
   url: string
@@ -24,9 +18,10 @@ interface InputBarProps {
   onExternalValueConsumed?: () => void
   thinkingMode: boolean
   onThinkingModeChange: (enabled: boolean) => void
+  supportAttachments?: boolean
 }
 
-export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange }: InputBarProps) {
+export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange, supportAttachments }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -162,19 +157,21 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
           </button>
           <div className="flex items-center gap-2">
             {/* Attachment button */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || uploading}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              title={t('chat.addAttachment')}
-            >
-              {uploading ? (
-                <Upload className="h-3.5 w-3.5 animate-pulse" />
-              ) : (
-                <Paperclip className="h-3.5 w-3.5" />
-              )}
-              <span>{uploading ? t('chat.uploading') : t('chat.addAttachment')}</span>
-            </button>
+            {supportAttachments !== false && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || uploading}
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title={t('chat.addAttachment')}
+              >
+                {uploading ? (
+                  <Upload className="h-3.5 w-3.5 animate-pulse" />
+                ) : (
+                  <Paperclip className="h-3.5 w-3.5" />
+                )}
+                <span>{uploading ? t('chat.uploading') : t('chat.addAttachment')}</span>
+              </button>
+            )}
             <input
               ref={fileInputRef}
               type="file"

@@ -25,9 +25,10 @@ interface ChatPanelProps {
   onRevert: (index: number) => Promise<string | null>
   onPluginCall?: (pluginName: string, toolName: string, input: Record<string, unknown>) => void
   backgroundImage?: string
+  supportAttachments?: boolean
 }
 
-export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, onPluginCall, backgroundImage }: ChatPanelProps) {
+export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, onPluginCall, backgroundImage, supportAttachments }: ChatPanelProps) {
   const { t } = useTranslation()
   const bottomRef = useRef<HTMLDivElement>(null)
   const [revertedText, setRevertedText] = useState<string>('')
@@ -107,6 +108,7 @@ export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, onPlu
               onExternalValueConsumed={handleExternalValueConsumed}
               thinkingMode={thinkingMode}
               onThinkingModeChange={setThinkingMode}
+              supportAttachments={supportAttachments}
             />
           </>
         )}
