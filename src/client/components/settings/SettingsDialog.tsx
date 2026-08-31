@@ -189,7 +189,6 @@ function BrandingSettings({ token }: { token: string }) {
                 backgroundImage: `url(${config.app_background})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
-                opacity: 0.2,
               }}
             />
           ) : (

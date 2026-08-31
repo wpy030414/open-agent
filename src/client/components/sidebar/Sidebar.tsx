@@ -195,7 +195,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, on
 
       {/* Bottom bar — user info + settings */}
       <div className="border-t flex items-center justify-between px-3" style={{ height: '60px' }}>
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 ml-2">
           <User className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
           <span className="text-sm truncate">{currentUser}</span>
         </div>
