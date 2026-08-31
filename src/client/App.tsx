@@ -48,6 +48,14 @@ export function App() {
     chat.createConversation()
   }
 
+  // Listen for auth:expired events dispatched by the API layer
+  // when a 401 response is received (token invalid/expired).
+  useEffect(() => {
+    const onAuthExpired = () => handleLogout()
+    window.addEventListener('auth:expired', onAuthExpired)
+    return () => window.removeEventListener('auth:expired', onAuthExpired)
+  }, [])
+
   useEffect(() => {
     api.getAppName().then((r) => {
       setAppName(r.app_name)

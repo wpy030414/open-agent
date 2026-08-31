@@ -153,6 +153,11 @@ export function useChat() {
         })
 
         if (!res.ok) {
+          if (res.status === 401) {
+            localStorage.removeItem('user')
+            localStorage.removeItem('token')
+            window.dispatchEvent(new CustomEvent('auth:expired'))
+          }
           const err = await res.json().catch(() => ({ error: res.statusText }))
           throw new Error(err.error || `HTTP ${res.status}`)
         }
