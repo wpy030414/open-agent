@@ -1,6 +1,9 @@
 import { Hono } from 'hono'
+import { sql } from 'drizzle-orm'
 import { adminAuthMiddleware, signAdminToken, verifyAdminKey } from '../auth.js'
 import { getConfig, updateConfig } from '../config.js'
+import { db } from '../db.js'
+import { conversations, messages } from '../schema.js'
 import { pluginRegistry } from '../plugins/registry.js'
 import { skillRegistry } from '../skills/loader.js'
 import fs from 'fs'
@@ -25,6 +28,7 @@ adminRoute.post('/auth', async (c) => {
 adminRoute.use('/config', adminAuthMiddleware)
 adminRoute.use('/plugins/*', adminAuthMiddleware)
 adminRoute.use('/skills/*', adminAuthMiddleware)
+adminRoute.use('/stats', adminAuthMiddleware)
 
 // Get current config
 adminRoute.get('/config', async (c) => {
@@ -37,6 +41,82 @@ adminRoute.put('/config', async (c) => {
   const body = await c.req.json()
   const config = await updateConfig(body)
   return c.json(config)
+})
+
+// Statistics: overall counts
+adminRoute.get('/stats', async (c) => {
+  const [userCount] = await db
+    .select({ value: sql<number>`count(distinct ${conversations.user_id})` })
+    .from(conversations)
+    .all()
+
+  const [convCount] = await db
+    .select({ value: sql<number>`count(*)` })
+    .from(conversations)
+    .all()
+
+  const [msgCount] = await db
+    .select({ value: sql<number>`count(*)` })
+    .from(messages)
+    .all()
+
+  return c.json({
+    total_users: userCount?.value ?? 0,
+    total_conversations: convCount?.value ?? 0,
+    total_messages: msgCount?.value ?? 0,
+  })
+})
+
+// Statistics: all conversations with user info and message counts
+adminRoute.get('/stats/conversations', async (c) => {
+  const rows = await db
+    .select({
+      id: conversations.id,
+      user_id: conversations.user_id,
+      title: conversations.title,
+      created_at: conversations.created_at,
+      updated_at: conversations.updated_at,
+      message_count: sql<number>`count(${messages.id})`,
+    })
+    .from(conversations)
+    .leftJoin(messages, sql`${messages.conversation_id} = ${conversations.id}`)
+    .groupBy(conversations.id)
+    .orderBy(sql`${conversations.updated_at} desc`)
+    .all()
+
+  return c.json({ conversations: rows })
+})
+
+// Statistics: get messages for a specific conversation
+adminRoute.get('/stats/conversations/:id/messages', async (c) => {
+  const id = c.req.param('id')
+
+  const conv = await db
+    .select()
+    .from(conversations)
+    .where(sql`${conversations.id} = ${id}`)
+    .get()
+
+  if (!conv) {
+    return c.json({ error: 'Conversation not found' }, 404)
+  }
+
+  const msgs = await db
+    .select()
+    .from(messages)
+    .where(sql`${messages.conversation_id} = ${id}`)
+    .orderBy(sql`${messages.created_at} asc`)
+    .all()
+
+  return c.json({
+    conversation: conv,
+    messages: msgs.map((m) => ({
+      ...m,
+      tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : null,
+      suggestions: m.suggestions ? JSON.parse(m.suggestions) : null,
+      attachments: m.attachments ? JSON.parse(m.attachments) : null,
+    })),
+  })
 })
 
 // List plugins
