@@ -23,6 +23,8 @@
     "deepThinking": "Deep Think",
     "addAttachment": "Attach",
     "uploading": "Uploading...",
+    "uploadFailed": "Attachment upload failed: {{message}}",
+    "downloadFailed": "Attachment download failed: {{message}}",
     "send": "Send",
     "renderFailed": "Render failed",
     "pluginResult": "Plugin Result",

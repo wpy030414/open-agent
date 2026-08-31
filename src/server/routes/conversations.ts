@@ -81,7 +81,10 @@ conversationsRoute.patch('/:id', async (c) => {
 
   await db.update(conversations).set({ title: body.title, updated_at: now }).where(and(eq(conversations.id, id), eq(conversations.user_id, userId))).run()
 
-  const conv = await db.select().from(conversations).where(eq(conversations.id, id)).get()
+  // Scope the read-back by user_id too — otherwise a caller who renames someone
+  // else's conversation (the UPDATE above no-ops) still gets that conversation echoed.
+  const conv = await db.select().from(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId))).get()
+  if (!conv) return c.json({ error: 'Not found' }, 404)
   return c.json({ conversation: conv })
 })
 

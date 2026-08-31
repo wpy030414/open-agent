@@ -2,7 +2,7 @@
 
 ## 概述
 
-管理员系统提供密钥认证、JWT Token 管理和全局配置管理能力。所有配置变更通过管理员 API 持久化到 SQLite。
+管理员系统提供密钥认证、JWT Token 管理、全局配置管理能力，以及数据统计面板。所有配置变更通过管理员 API 持久化到 SQLite。用户认证（PIN）另见 `module-auth.md`。
 
 ## 涉及文件
 
@@ -10,78 +10,97 @@
 |---|---|
 | `src/server/auth.ts` | JWT 签名/验证 + 密钥校验 + 认证中间件 |
 | `src/server/config.ts` | 环境变量读取 + DB 配置读写 |
-| `src/server/routes/admin.ts` | 管理员 REST API |
+| `src/server/routes/admin.ts` | 管理员 REST API（含统计、插件/技能上传） |
+| `src/client/components/settings/SettingsDialog.tsx` | 管理面板（6 标签页） |
 
 ## 认证流程
 
 ```
 管理员输入密钥
   → POST /api/admin/auth { key: "..." }
-  → verifyAdminKey() 比对 env.ADMIN_KEY
-  → signAdminToken() 签发 JWT (HS256, 24h)
+  → verifyAdminKey() 比对 env.ADMIN_KEY（空串视为无效）
+  → signAdminToken() 签发 JWT (HS256, role:admin, 24h)
   → 返回 { token, expires_at }
 
 后续请求
   → Authorization: Bearer <jwt>
-  → adminAuthMiddleware 验证 JWT
+  → adminAuthMiddleware 验证 JWT（校验签名 + role==='admin'）
   → 通过则继续处理
 ```
+
+> 中间件按路径挂载（`adminRoute.use('/config', ...)` 等），`POST /api/admin/auth` 保持公开。
 
 ## 接口契约
 
 ### POST /api/admin/auth
 
-验证管理员密钥，返回 JWT。
+验证管理员密钥，返回 JWT。**无需认证。**
 
-**请求**：
-```json
-{ "key": "管理员密钥" }
-```
-
-**响应**：
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiJ9...",
-  "expires_at": 1700086400
-}
-```
-
-**错误**：密钥错误返回 401 `{ "error": "Invalid key" }`。
+**请求**：`{ "key": "管理员密钥" }`
+**响应**：`{ "token": "eyJ...", "expires_at": 1700086400 }`
+**错误**：密钥错误或为空 → 401 `{ "error": "Invalid key" }`
 
 ### GET /api/admin/config（需 JWT）
 
-获取当前配置（API Key 脱敏显示）。
+获取当前配置。
 
 **响应**：
 ```json
 {
   "app_name": "Open Agent",
   "app_favicon": "",
+  "app_background": "",
   "api_endpoint": "https://api.openai.com/v1",
-  "api_key": "***1234",
+  "api_key": "sk-....abcd",
   "model": "gpt-4o",
-  "system_prompt": "You are a helpful assistant."
+  "system_prompt": "You are a helpful assistant.",
+  "support_attachments": false
 }
 ```
 
-**脱敏规则**：`***` + API Key 最后 4 个字符。
+> ⚠️ **API Key 目前以完整明文返回，脱敏尚未实现。** 早期文档所述「`***` + 后 4 位」在代码中并不存在——`config.ts:getConfig()` 直接回传 `api_key`，本条已实测确认（返回体含完整密钥字符串）。修复见下方「安全约束」。响应示例中的值为占位示意，非真实密钥。
 
 ### PUT /api/admin/config（需 JWT）
 
 更新配置（部分更新）。
 
-**请求**：
+**请求**（示例）：
 ```json
 {
   "app_name": "我的助手",
-  "model": "gpt-4o-mini",
-  "system_prompt": "你是一个友好的助手"
+  "model": "qwen3.7-plus",
+  "system_prompt": "你是一个友好的助手",
+  "app_background": "data:image/png;base64,...",
+  "support_attachments": true
 }
 ```
 
 **响应**：更新后的完整配置对象。
 
-**行为**：只更新请求中提供的字段（`undefined` 值跳过）。
+**行为**：只更新请求中提供的字段（`undefined` 值跳过）；`support_attachments` 布尔值以 `'true'/'false'` 字符串入库。
+
+### GET /api/admin/stats（需 JWT）
+
+整体统计。
+
+**响应**：
+```json
+{ "total_users": 3, "total_conversations": 42, "total_messages": 187 }
+```
+
+`total_users` = `count(distinct user_id)` over conversations。
+
+### GET /api/admin/stats/conversations（需 JWT）
+
+所有对话（含 user_id 与消息数），按 `updated_at` 降序。
+
+**响应**：`{ "conversations": [{ "id","user_id","title","created_at","updated_at","message_count" }] }`
+
+### GET /api/admin/stats/conversations/:id/messages（需 JWT）
+
+查看任意对话的完整消息（管理员可跨用户浏览，不校验归属）。反序列化 `tool_calls`、`suggestions`、`attachments` 后返回。
+
+**响应**：`{ "conversation": {...}, "messages": [...] }`；对话不存在 → 404。
 
 ## 配置层级
 
@@ -98,22 +117,66 @@
 |---|---|---|---|
 | `app_name` | — | `Open Agent` | 应用名称 |
 | `app_favicon` | — | `""`（空=默认） | Base64 data URL |
+| `app_background` | — | `""`（空=无背景） | 聊天背景图，Base64 data URL |
 | `api_endpoint` | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | API 地址 |
 | `api_key` | `OPENAI_API_KEY` | `""` | API 密钥 |
 | `model` | `OPENAI_MODEL` | `gpt-4o` | 模型名称 |
 | `system_prompt` | — | `""`（空） | 系统提示词 |
+| `support_attachments` | — | `false` | 全局附件开关 |
 
 ## JWT 实现细节
 
 - **算法**：HS256
-- **签名密钥**：`ADMIN_KEY` 的 UTF-8 编码字节
+- **签名密钥**：`ADMIN_KEY` 的 UTF-8 编码字节（与用户 JWT 共用，靠 `role` 区分）
 - **Payload**：`{ role: "admin" }`
-- **有效期**：24 小时
-- **回退密钥**：如果 `ADMIN_KEY` 为空，使用 `"fallback-secret"`（不推荐）
+- **有效期**：24 小时（`ADMIN_TOKEN_EXPIRY_HOURS`）
+- **回退密钥**：`ADMIN_KEY` 为空时使用 `"fallback-secret"`（不推荐）
+
+## 插件 / 技能上传
+
+管理员通过本路由上传/安装/卸载插件与技能，zip 处理逻辑（zip slip 防护、包装目录检测、macOS 产物清理、50MB 上限）详见 `module-plugin.md` 与 `module-skill.md`。对应端点：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/admin/plugins` | 列出插件 |
+| POST | `/api/admin/plugins/upload` | 上传插件 zip |
+| POST | `/api/admin/plugins/install` | 安装/刷新已有目录 |
+| DELETE | `/api/admin/plugins/:name` | 卸载插件 |
+| GET | `/api/admin/skills` | 列出技能 |
+| POST | `/api/admin/skills/upload` | 上传技能 zip |
+| POST | `/api/admin/skills/install` | 安装/刷新已有目录 |
+| DELETE | `/api/admin/skills/:name` | 卸载技能 |
+
+## 前端面板（SettingsDialog）
+
+6 个标签页：
+
+1. **Branding** — 应用名称、Favicon（上传转 base64）、聊天背景图
+2. **Model** — API 地址、密钥、模型名称（密钥输入框为 `type=password` 遮挡显示 + 明文切换按钮）
+3. **Prompt** — 系统提示词编辑
+4. **Plugins** — 插件列表 / 上传 / 卸载
+5. **Skills** — 技能列表 / 上传 / 卸载
+6. **Stats** — 用户/对话/消息统计 + 对话表格（可展开查看消息）
+
+管理面板使用管理员 JWT（通过 `useAdmin` hook 管理），调用 API 时显式传入 `Authorization`，不被用户 token 覆盖（见 `lib/api.ts` 的「caller 提供 Authorization 则不覆盖」逻辑）。
 
 ## 安全约束
 
-1. `ADMIN_KEY` 永远不通过 API 返回给前端
-2. `getConfig()` 返回时对 `api_key` 进行脱敏
-3. 受保护路由：`/api/admin/config`、`/api/admin/plugins/*`、`/api/admin/skills/*`
-4. 空密钥不被视为有效（`verifyAdminKey` 检查 `key !== ''`）
+1. `ADMIN_KEY` 永远不通过 API 返回给前端 ✅ 已实现
+2. 受保护路由：`/api/admin/config`、`/api/admin/plugins/*`、`/api/admin/skills/*`、`/api/admin/stats` ✅ 已实现
+3. 空密钥不被视为有效（`verifyAdminKey` 检查 `key !== ''`）✅ 已实现
+4. 统计面板可跨用户读取所有对话内容 —— 属管理员特权，受管理员 JWT 保护（`use('/stats', ...)` + `use('/stats/*', ...)` 双挂载覆盖精确路径与所有子路径；曾因只挂 `/stats` 导致 `/stats/conversations` 及 messages 子端点匿名可访问，已修复并实测验证）
+
+## ⚠️ 已知缺陷：API Key 未脱敏
+
+**需求（PRD F7「API Key 脱敏显示」）与实现不符。**
+
+`src/server/config.ts:getConfig()` 原样回传 `api_key`，`GET /api/admin/config` 返回**完整明文密钥**。已实测确认：
+
+```
+{"api_key":"<完整密钥明文>", ...}
+```
+
+**影响**：任何拿到管理员 JWT 的人（或能查看该请求的中间人/浏览器历史/日志）即可获取上游 API 密钥明文。前端仅用 `type=password` 遮挡渲染，属**视觉遮罩而非安全边界**，不改变响应体含明文的事实。
+
+**修复方向**：在 `getConfig()` 中按调用场景区分 —— 供管理员面板读取时返回 `***` + 后 4 位；`updateConfig()` 需识别脱敏占位值以避免把 `***abcd` 回写入库（否则保存一次配置就会污染真实密钥）。这是脱敏必须同时改动写入路径的原因，不能只在 GET 侧打补丁。

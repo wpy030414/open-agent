@@ -26,6 +26,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -75,6 +76,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
     if (!files || files.length === 0) return
 
     setUploading(true)
+    setUploadError('')
     try {
       const newAttachments: Attachment[] = []
       for (const file of Array.from(files)) {
@@ -82,6 +84,9 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
         formData.append('file', file)
         const res = await fetch('/api/upload', {
           method: 'POST',
+          // /api/upload requires the user JWT; do NOT set Content-Type here,
+          // the browser must generate the multipart boundary itself.
+          headers: { Authorization: `Bearer ${getToken() || ''}` },
           body: formData,
         })
         if (!res.ok) {
@@ -94,7 +99,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
       setAttachments((prev) => [...prev, ...newAttachments])
     } catch (err) {
       console.error('Upload failed:', err)
-      // Could show a toast here
+      setUploadError(err instanceof Error ? err.message : String(err))
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -128,6 +133,20 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Upload error — visible, dismissible */}
+        {uploadError && (
+          <div className="flex items-start gap-1.5 mb-2 px-2 py-1.5 rounded-md bg-destructive/10 text-destructive text-xs">
+            <span className="flex-1 break-words">{t('chat.uploadFailed', { message: uploadError })}</span>
+            <button
+              onClick={() => setUploadError('')}
+              className="hover:text-destructive/70 flex-shrink-0 mt-0.5"
+              aria-label="dismiss"
+            >
+              <X className="h-3 w-3" />
+            </button>
           </div>
         )}
 

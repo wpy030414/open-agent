@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Download, FileText, FileImage, FileSpreadsheet, File, FileType } from 'lucide-react'
+import { getToken } from '../../lib/api'
 
 interface Attachment {
   url: string
@@ -31,7 +33,10 @@ async function downloadFile(url: string, name: string) {
   // Build download URL with original filename as query param
   const sep = url.includes('?') ? '&' : '?'
   const downloadUrl = `${url}${sep}name=${encodeURIComponent(name)}`
-  const res = await fetch(downloadUrl)
+  // /api/upload/file/* sits behind the same user-JWT middleware as the upload endpoint
+  const res = await fetch(downloadUrl, {
+    headers: { Authorization: `Bearer ${getToken() || ''}` },
+  })
   if (!res.ok) throw new Error(`Download failed: ${res.status}`)
   const blob = await res.blob()
   const blobUrl = URL.createObjectURL(blob)
@@ -46,22 +51,39 @@ async function downloadFile(url: string, name: string) {
 
 export function AttachmentCard({ attachment }: AttachmentCardProps) {
   const { t } = useTranslation()
+  const [error, setError] = useState('')
+
+  const handleClick = async () => {
+    setError('')
+    try {
+      await downloadFile(attachment.url, attachment.name)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   return (
-    <button
-      onClick={() => downloadFile(attachment.url, attachment.name)}
-      className="inline-flex items-center gap-2.5 px-3 py-2 rounded-lg border bg-background/80 hover:bg-muted/50 transition-colors group/card max-w-[260px] text-left"
-      title={attachment.name}
-    >
-      <div className="flex-shrink-0">
-        {getFileIcon(attachment.type, attachment.name)}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium truncate">{attachment.name}</div>
-        <div className="text-[10px] text-muted-foreground">{formatSize(attachment.size)}</div>
-      </div>
-      <Download className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground group-hover/card:text-foreground transition-colors" />
-    </button>
+    <div className="max-w-[260px]">
+      <button
+        onClick={handleClick}
+        className="inline-flex items-center gap-2.5 px-3 py-2 rounded-lg border bg-background/80 hover:bg-muted/50 transition-colors group/card w-full text-left"
+        title={error || attachment.name}
+      >
+        <div className="flex-shrink-0">
+          {getFileIcon(attachment.type, attachment.name)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-medium truncate">{attachment.name}</div>
+          <div className="text-[10px] text-muted-foreground">{formatSize(attachment.size)}</div>
+        </div>
+        <Download className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground group-hover/card:text-foreground transition-colors" />
+      </button>
+      {error && (
+        <div className="mt-1 px-2 py-1 rounded bg-destructive/10 text-destructive text-[10px] break-words">
+          {t('chat.downloadFailed', { message: error })}
+        </div>
+      )}
+    </div>
   )
 }
 

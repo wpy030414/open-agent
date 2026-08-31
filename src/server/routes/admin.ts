@@ -28,7 +28,10 @@ adminRoute.post('/auth', async (c) => {
 adminRoute.use('/config', adminAuthMiddleware)
 adminRoute.use('/plugins/*', adminAuthMiddleware)
 adminRoute.use('/skills/*', adminAuthMiddleware)
+// '/stats' alone does NOT match sub-paths (e.g. /stats/conversations) in Hono —
+// mount both the exact and wildcard forms so every stats endpoint is protected.
 adminRoute.use('/stats', adminAuthMiddleware)
+adminRoute.use('/stats/*', adminAuthMiddleware)
 
 // Get current config
 adminRoute.get('/config', async (c) => {

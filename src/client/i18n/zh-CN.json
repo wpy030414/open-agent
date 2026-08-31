@@ -23,6 +23,8 @@
     "deepThinking": "深度思考",
     "addAttachment": "添加附件",
     "uploading": "上传中...",
+    "uploadFailed": "附件上传失败：{{message}}",
+    "downloadFailed": "附件下载失败：{{message}}",
     "send": "发送",
     "renderFailed": "渲染失败",
     "pluginResult": "插件结果",
