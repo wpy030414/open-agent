@@ -57,6 +57,7 @@ async function migrate() {
       tool_calls TEXT,
       tool_call_id TEXT,
       suggestions TEXT,
+      attachments TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
