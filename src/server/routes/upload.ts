@@ -2,8 +2,12 @@ import { Hono } from 'hono'
 import path from 'path'
 import fs from 'fs'
 import { randomUUID } from 'crypto'
+import { userAuthMiddleware } from '../middleware/userAuth.js'
 
 export const uploadRoute = new Hono()
+
+// Apply user auth to upload endpoint
+uploadRoute.use('/*', userAuthMiddleware)
 
 const UPLOAD_DIR = path.resolve('uploads')
 const MAX_SIZE = 20 * 1024 * 1024 // 20MB

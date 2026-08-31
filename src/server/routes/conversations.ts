@@ -3,13 +3,16 @@ import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
 import { eq, and, desc, gte } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
+import { userAuthMiddleware } from '../middleware/userAuth.js'
 
 function getUserId(c: any): string {
-  const raw = c.req.header('x-user') || ''
-  try { return decodeURIComponent(raw) } catch { return raw }
+  return c.get('userId') || ''
 }
 
 export const conversationsRoute = new Hono()
+
+// Apply user auth to all routes
+conversationsRoute.use('*', userAuthMiddleware)
 
 // List user's conversations
 conversationsRoute.get('/', async (c) => {

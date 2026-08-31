@@ -16,6 +16,7 @@ import { adminRoute } from './routes/admin.js'
 import { pluginsRoute } from './routes/plugins.js'
 import { chatRoute } from './routes/chat.js'
 import { uploadRoute } from './routes/upload.js'
+import { userRoute } from './routes/user.js'
 
 const app = new Hono()
 
@@ -23,7 +24,7 @@ const app = new Hono()
 app.use('*', logger())
 app.use('*', cors({
   origin: '*',
-  allowHeaders: ['Content-Type', 'Authorization'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-User'],
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }))
 
@@ -33,6 +34,7 @@ app.route('/api/admin', adminRoute)
 app.route('/api/plugins', pluginsRoute)
 app.route('/api/chat', chatRoute)
 app.route('/api/upload', uploadRoute)
+app.route('/api/user', userRoute)
 
 // Static files (production build only)
 const clientDist = path.resolve('dist/client')

@@ -5,13 +5,35 @@ export function getUser(): string | null {
   return localStorage.getItem('user')
 }
 
+export function getToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('token')
+}
+
+export function setToken(token: string | null) {
+  if (token) {
+    localStorage.setItem('token', token)
+  } else {
+    localStorage.removeItem('token')
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const user = getUser()
+  const token = getToken()
+  const optsHeaders = (options?.headers as Record<string, string>) || {}
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...((options?.headers as Record<string, string>) || {}),
+    ...optsHeaders,
   }
-  if (user) headers['X-User'] = encodeURIComponent(user)
+  if (user && !optsHeaders['X-User'] && !optsHeaders['x-user']) {
+    headers['X-User'] = encodeURIComponent(user)
+  }
+  // Only attach the user JWT if the caller didn't supply an explicit Authorization
+  // (admin calls pass their own admin JWT and must not be overwritten).
+  if (token && !optsHeaders['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
 
   const res = await fetch(`${BASE}${path}`, {
     ...options,
@@ -25,6 +47,26 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // User Auth
+  getUserStatus: (username: string) => request<{ has_pin: boolean }>(`/api/user/status?username=${encodeURIComponent(username)}`, {
+    headers: { 'X-User': username }
+  }),
+  verifyPin: (username: string, pin: string) => request<{ token: string; expires_at: number }>('/api/user/verify', {
+    method: 'POST',
+    body: JSON.stringify({ pin }),
+    headers: { 'X-User': username }
+  }),
+  setPin: (username: string, pin: string) => request<{ token: string; expires_at: number }>('/api/user/set-pin', {
+    method: 'POST',
+    body: JSON.stringify({ pin }),
+    headers: { 'X-User': username }
+  }),
+  changePin: (username: string, oldPin: string, newPin: string) => request<{ success: boolean }>('/api/user/change-pin', {
+    method: 'POST',
+    body: JSON.stringify({ old_pin: oldPin, new_pin: newPin }),
+    headers: { 'X-User': username }
+  }),
+
   // Conversations
   listConversations: () => request<{ conversations: import('@/shared/types').Conversation[] }>('/api/conversations'),
   getConversation: (id: string) => request<{ conversation: import('@/shared/types').Conversation; messages: import('@/shared/types').Message[] }>(`/api/conversations/${id}`),
@@ -35,7 +77,7 @@ export const api = {
 
   // Plugins
   listPlugins: () => request<{ plugins: Array<{ name: string; version: string; description: string; tools: Array<{ name: string; description: string }> }> }>('/api/plugins'),
-  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string }>('/api/plugins/app-name'),
+  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean }>('/api/plugins/app-name'),
 
   // Admin
   adminAuth: (key: string) => request<{ token: string; expires_at: number }>('/api/admin/auth', { method: 'POST', body: JSON.stringify({ key }) }),
@@ -47,6 +89,9 @@ export const api = {
   listAdminSkills: (token: string) => request<{ skills: import('@/shared/types').InstalledSkill[] }>('/api/admin/skills', { headers: { Authorization: `Bearer ${token}` } }),
   installSkill: (token: string, name: string) => request('/api/admin/skills/install', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ name }) }),
   uninstallSkill: (token: string, name: string) => request(`/api/admin/skills/${name}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }),
+  getAdminStats: (token: string) => request<import('@/shared/types').AdminStats>('/api/admin/stats', { headers: { Authorization: `Bearer ${token}` } }),
+  getAdminConversations: (token: string) => request<{ conversations: import('@/shared/types').AdminConversationRow[] }>('/api/admin/stats/conversations', { headers: { Authorization: `Bearer ${token}` } }),
+  getAdminConversationMessages: (token: string, id: string) => request<{ conversation: any; messages: import('@/shared/types').Message[] }>(`/api/admin/stats/conversations/${id}/messages`, { headers: { Authorization: `Bearer ${token}` } }),
 
   // Upload (multipart/form-data — do NOT set Content-Type, let browser set boundary)
   uploadPlugin: (token: string, file: File) => {

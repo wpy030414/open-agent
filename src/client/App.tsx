@@ -7,10 +7,11 @@ import { Sidebar } from './components/sidebar/Sidebar'
 import { ChatPanel } from './components/chat/ChatPanel'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { MenuDialog } from './components/settings/MenuDialog'
+import { ChangePinDialog } from './components/settings/ChangePinDialog'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { Button } from './components/ui/button'
 import { PanelLeft } from 'lucide-react'
-import { api, getUser } from './lib/api'
+import { api, getUser, setToken } from './lib/api'
 
 export function App() {
   const { t, i18n } = useTranslation()
@@ -19,8 +20,10 @@ export function App() {
   const { theme, setTheme } = useTheme()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [changePinOpen, setChangePinOpen] = useState(false)
   const [appName, setAppName] = useState('Open Agent')
   const [backgroundImage, setBackgroundImage] = useState('')
+  const [supportAttachments, setSupportAttachments] = useState(false)
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -29,8 +32,9 @@ export function App() {
     return false
   })
 
-  const handleLogin = (username: string) => {
+  const handleLogin = (username: string, token: string) => {
     localStorage.setItem('user', username)
+    setToken(token)
     setCurrentUser(username)
     // Reload conversations for the new user
     setTimeout(() => chat.refreshConversations(), 100)
@@ -38,6 +42,7 @@ export function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('user')
+    setToken(null)
     setCurrentUser(null)
     // Clear current session
     chat.createConversation()
@@ -53,6 +58,7 @@ export function App() {
       if (r.app_background) {
         setBackgroundImage(r.app_background)
       }
+      setSupportAttachments(!!r.support_attachments)
     }).catch(() => {})
   }, [])
 
@@ -66,6 +72,7 @@ export function App() {
           if (link) link.href = r.app_favicon
         }
         setBackgroundImage(r.app_background || '')
+        setSupportAttachments(!!r.support_attachments)
       }).catch(() => {})
     }
   }, [settingsOpen])
@@ -141,7 +148,7 @@ export function App() {
         <Button
           variant="ghost"
           size="icon"
-          className="absolute top-3 left-3 z-30 h-8 w-8"
+          className="absolute top-[14px] left-3 z-30 h-8 w-8 hover:bg-accent/50"
           onClick={() => setSidebarOpen(!sidebarOpen)}
         >
           <PanelLeft className="h-4 w-4" />
@@ -156,6 +163,7 @@ export function App() {
           onRevert={chat.revertMessage}
           onPluginCall={chat.callPlugin}
           backgroundImage={backgroundImage}
+          supportAttachments={supportAttachments}
         />
       </div>
 
@@ -170,6 +178,14 @@ export function App() {
         onAdminSettings={handleAdminSettings}
         currentUser={currentUser}
         onLogout={handleLogout}
+        onChangePin={() => setChangePinOpen(true)}
+      />
+
+      {/* Change PIN Dialog */}
+      <ChangePinDialog
+        open={changePinOpen}
+        onOpenChange={setChangePinOpen}
+        username={currentUser}
       />
 
       {/* Settings Dialog (admin) */}

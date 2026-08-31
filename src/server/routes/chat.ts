@@ -10,8 +10,12 @@ import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage } from '../../shared/types.js'
 import { randomUUID } from 'crypto'
 import { parseAttachment } from '../files/parser.js'
+import { userAuthMiddleware } from '../middleware/userAuth.js'
 
 export const chatRoute = new Hono()
+
+// Apply user auth to all routes
+chatRoute.use('*', userAuthMiddleware)
 
 chatRoute.get('/health', (c) => {
   return c.json({ status: 'ok', time: new Date().toISOString() })
@@ -22,8 +26,7 @@ chatRoute.get('/health', (c) => {
  * Standard HTTP, no WebSocket needed. Works through any proxy.
  */
 chatRoute.post('/', async (c) => {
-  const rawUserId = c.req.header('x-user') || ''
-  const userId = (() => { try { return decodeURIComponent(rawUserId) } catch { return rawUserId } })()
+  const userId = (c as any).get('userId') as string
   if (!userId) {
     return c.json({ error: 'Unauthorized' }, 401)
   }

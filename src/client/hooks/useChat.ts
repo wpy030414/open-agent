@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, getUser } from '../lib/api'
+import { api, getUser, getToken } from '../lib/api'
 import type { Conversation, Attachment } from '@/shared/types'
 
 interface ChatMessage {
@@ -137,7 +137,11 @@ export function useChat() {
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(getUser() || '') },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-User': encodeURIComponent(getUser() || ''),
+            'Authorization': `Bearer ${getToken() || ''}`
+          },
           body: JSON.stringify({
             message: text,
             conversation_id: convId || undefined,
