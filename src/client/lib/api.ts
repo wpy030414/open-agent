@@ -11,7 +11,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     'Content-Type': 'application/json',
     ...((options?.headers as Record<string, string>) || {}),
   }
-  if (user) headers['X-User'] = user
+  if (user) headers['X-User'] = encodeURIComponent(user)
 
   const res = await fetch(`${BASE}${path}`, {
     ...options,

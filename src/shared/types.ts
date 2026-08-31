@@ -4,6 +4,13 @@
 
 // ---- Conversation & Messages ----
 
+export interface Attachment {
+  url: string
+  name: string
+  size: number
+  type: string
+}
+
 export interface Conversation {
   id: string
   title: string
@@ -20,6 +27,7 @@ export interface Message {
   tool_calls?: ToolCall[] | null
   tool_call_id?: string | null
   suggestions?: string[] | null
+  attachments?: Attachment[] | null
   created_at: number
 }
 

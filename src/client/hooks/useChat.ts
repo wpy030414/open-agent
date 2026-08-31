@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, getUser } from '../lib/api'
-import type { Conversation } from '@/shared/types'
+import type { Conversation, Attachment } from '@/shared/types'
 
 interface ChatMessage {
   id?: number
@@ -10,6 +10,7 @@ interface ChatMessage {
   thinking?: string
   toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string }>
   suggestions?: string[]
+  attachments?: Attachment[]
   streaming?: boolean
   created_at?: string
 }
@@ -47,8 +48,9 @@ export function useChat() {
             role: m.role as 'user' | 'assistant',
             content: m.content,
             thinking: m.thinking || undefined,
-            toolCalls: m.tool_calls ? JSON.parse(m.tool_calls as any) : undefined,
-            suggestions: m.suggestions ? JSON.parse(m.suggestions as any) : undefined,
+            toolCalls: m.tool_calls as any || undefined,
+            suggestions: m.suggestions as any || undefined,
+            attachments: m.attachments as any || undefined,
           }))
         )
       })
@@ -78,8 +80,9 @@ export function useChat() {
               role: m.role as 'user' | 'assistant',
               content: m.content,
               thinking: m.thinking || undefined,
-              toolCalls: m.tool_calls ? JSON.parse(m.tool_calls as any) : undefined,
-              suggestions: m.suggestions ? JSON.parse(m.suggestions as any) : undefined,
+              toolCalls: m.tool_calls as any || undefined,
+              suggestions: m.suggestions as any || undefined,
+              attachments: m.attachments as any || undefined,
             }))
           )
         })
@@ -105,10 +108,10 @@ export function useChat() {
     })
   }, [])
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, thinkingMode = true, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => {
     if (!text.trim() || loading) return
 
-    const userMsg: ChatMessage = { role: 'user', content: text }
+    const userMsg: ChatMessage = { role: 'user', content: text, attachments }
     const assistantMsg: ChatMessage = { role: 'assistant', content: '', streaming: true }
     setMessages((prev) => [...prev, userMsg, assistantMsg])
     setLoading(true)
@@ -134,11 +137,13 @@ export function useChat() {
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-User': getUser() || '' },
+          headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(getUser() || '') },
           body: JSON.stringify({
             message: text,
             conversation_id: convId || undefined,
             _retry: isRetry,
+            thinking_mode: thinkingMode,
+            attachments: attachments || undefined,
           }),
           signal: abort.signal,
         })
@@ -251,8 +256,9 @@ export function useChat() {
             role: m.role as 'user' | 'assistant',
             content: m.content,
             thinking: m.thinking || undefined,
-            toolCalls: m.tool_calls ? JSON.parse(m.tool_calls as any) : undefined,
-            suggestions: m.suggestions ? JSON.parse(m.suggestions as any) : undefined,
+            toolCalls: m.tool_calls as any || undefined,
+            suggestions: m.suggestions as any || undefined,
+            attachments: m.attachments as any || undefined,
           }))
         )
       } catch {
@@ -410,8 +416,9 @@ export function useChat() {
           role: m.role as 'user' | 'assistant',
           content: m.content,
           thinking: m.thinking || undefined,
-          toolCalls: m.tool_calls ? JSON.parse(m.tool_calls as any) : undefined,
-          suggestions: m.suggestions ? JSON.parse(m.suggestions as any) : undefined,
+          toolCalls: m.tool_calls as any || undefined,
+          suggestions: m.suggestions as any || undefined,
+          attachments: m.attachments as any || undefined,
         }))
       )
     } catch (err) {

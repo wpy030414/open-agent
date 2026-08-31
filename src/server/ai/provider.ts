@@ -1,9 +1,14 @@
 import type { AppConfig } from '../../shared/types.js'
 import type { ToolDefinition } from '../../shared/types.js'
 
+// Multimodal content parts (OpenAI-compatible)
+export type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string | null
+  content: string | ContentPart[] | null
   tool_calls?: Array<{
     id: string
     type: 'function'
@@ -30,6 +35,7 @@ export async function* streamChatCompletion(
   config: AppConfig,
   messages: ChatMessage[],
   tools: ToolDefinition[],
+  thinkingMode = true,
 ): AsyncGenerator<StreamEvent> {
   const url = `${config.api_endpoint.replace(/\/$/, '')}/chat/completions`
 
@@ -38,6 +44,15 @@ export async function* streamChatCompletion(
     messages,
     stream: true,
     max_tokens: 100000,
+  }
+
+  // Explicitly toggle reasoning/thinking at the upstream API level.
+  // DashScope-compatible: `enable_thinking` controls reasoning_content streaming,
+  // `thinking_budget: 0` disables the thinking phase entirely for models that
+  // default to always-on reasoning (e.g. Qwen3 thinking variants).
+  body.enable_thinking = thinkingMode
+  if (!thinkingMode) {
+    body.thinking_budget = 0
   }
 
   if (tools.length > 0) {
@@ -121,8 +136,8 @@ export async function* streamChatCompletion(
           yield { type: 'token', text: delta.content }
         }
 
-        // Stream reasoning/thinking content
-        if (delta.reasoning_content) {
+        // Stream reasoning/thinking content (only when thinking is enabled)
+        if (thinkingMode && delta.reasoning_content) {
           yield { type: 'thinking', text: delta.reasoning_content }
         }
 

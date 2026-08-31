@@ -32,6 +32,10 @@ async function migrate() {
     if (!hasSuggestions) {
       await client.execute('ALTER TABLE messages ADD COLUMN suggestions TEXT')
     }
+    const hasAttachments = msgRes.rows.some((r) => r.name === 'attachments')
+    if (!hasAttachments) {
+      await client.execute('ALTER TABLE messages ADD COLUMN attachments TEXT')
+    }
   }
 
   // --- Main DDL (safe: IF NOT EXISTS on everything) ---

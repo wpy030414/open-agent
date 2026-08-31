@@ -20,6 +20,7 @@ Thumbs.db
 
 # 数据库文件
 data/*.db
+uploads/
 
 # IDE
 .vscode/

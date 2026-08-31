@@ -1,4 +1,5 @@
 import { MessageBubble } from './MessageBubble'
+import type { Attachment } from '@/shared/types'
 
 interface ChatMessage {
   id?: number
@@ -7,6 +8,7 @@ interface ChatMessage {
   thinking?: string
   toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string }>
   suggestions?: string[]
+  attachments?: Attachment[]
   streaming?: boolean
 }
 

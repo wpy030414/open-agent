@@ -1,5 +1,5 @@
 import type { AppConfig, ServerMessage, ToolCall } from '../../shared/types.js'
-import type { ChatMessage } from './provider.js'
+import type { ChatMessage, ContentPart } from './provider.js'
 import { streamChatCompletion } from './provider.js'
 import { getAllTools, resolveTool } from './tools.js'
 import { executeTool } from '../plugins/executor.js'
@@ -10,16 +10,17 @@ import { MAX_TOOL_ROUNDS, MAX_HISTORY_MESSAGES, SUGGESTIONS_FENCE } from '../../
 type SendFn = (msg: ServerMessage) => void
 
 export async function runChatLoop(
-  userMessage: string,
+  userMessage: string | ContentPart[],
   history: ChatMessage[],
   send: SendFn,
   signal?: AbortSignal,
+  thinkingMode = true,
 ): Promise<{ reply: string; suggestions: string[]; thinking: string }> {
   const config = await getConfig()
   const tools = getAllTools()
 
   // Build system prompt with skill hints
-  const systemPrompt = buildSystemPrompt(config)
+  const systemPrompt = buildSystemPrompt(config, thinkingMode)
 
   // Trim history
   const trimmedHistory = history.slice(-MAX_HISTORY_MESSAGES)
@@ -48,7 +49,7 @@ export async function runChatLoop(
 
     // Stream from the API
     try {
-      for await (const event of streamChatCompletion(config, messages, tools)) {
+      for await (const event of streamChatCompletion(config, messages, tools, thinkingMode)) {
         if (signal?.aborted) break
 
         switch (event.type) {
@@ -170,7 +171,7 @@ export async function runChatLoop(
   return { reply: '', suggestions: [], thinking: fullThinking }
 }
 
-function buildSystemPrompt(config: AppConfig): string {
+function buildSystemPrompt(config: AppConfig, thinkingMode: boolean): string {
   let prompt = config.system_prompt
 
   // Append skill descriptions
@@ -180,6 +181,13 @@ function buildSystemPrompt(config: AppConfig): string {
     for (const skill of skills) {
       prompt += `\n### ${skill.manifest.name}\n${skill.content}\n`
     }
+  }
+
+  // When thinking mode is off, explicitly tell the model to skip reasoning.
+  // /no_think is the Qwen3 convention for disabling extended thinking;
+  // the second line is provider-agnostic reinforcement.
+  if (!thinkingMode) {
+    prompt += '\n\n/no_think\n请直接回答问题，不要输出任何思考过程或推理步骤。'
   }
 
   // Hard format requirement — appended last so it stays authoritative even

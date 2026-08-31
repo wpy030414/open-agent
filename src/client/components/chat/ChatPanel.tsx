@@ -4,6 +4,7 @@ import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
 import { PluginBar } from './PluginBar'
 import { MessageSquarePlus } from 'lucide-react'
+import type { Attachment } from '@/shared/types'
 
 interface ChatMessage {
   id?: number
@@ -12,13 +13,14 @@ interface ChatMessage {
   thinking?: string
   toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string }>
   suggestions?: string[]
+  attachments?: Attachment[]
   streaming?: boolean
 }
 
 interface ChatPanelProps {
   messages: ChatMessage[]
   loading: boolean
-  onSend: (text: string) => void
+  onSend: (text: string, thinkingMode?: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => void | Promise<void>
   onCancel: () => void
   onRevert: (index: number) => Promise<string | null>
   onPluginCall?: (pluginName: string, toolName: string, input: Record<string, unknown>) => void
@@ -29,6 +31,7 @@ export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, onPlu
   const { t } = useTranslation()
   const bottomRef = useRef<HTMLDivElement>(null)
   const [revertedText, setRevertedText] = useState<string>('')
+  const [thinkingMode, setThinkingMode] = useState<boolean>(true)
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -44,6 +47,10 @@ export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, onPlu
 
   const handleExternalValueConsumed = () => {
     setRevertedText('')
+  }
+
+  const handleSend = (text: string, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => {
+    onSend(text, thinkingMode, attachments)
   }
 
   return (
@@ -72,7 +79,7 @@ export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, onPlu
             </div>
           </div>
         ) : (
-          <MessageList messages={messages} onSuggestion={onSend} onRevert={handleRevert} />
+          <MessageList messages={messages} onSuggestion={handleSend} onRevert={handleRevert} />
         )}
         <div ref={bottomRef} />
       </div>
@@ -94,10 +101,12 @@ export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, onPlu
               <PluginBar onPluginCall={onPluginCall || (() => {})} />
             </div>
             <InputBar
-              onSend={onSend}
+              onSend={handleSend}
               disabled={loading}
               externalValue={revertedText}
               onExternalValueConsumed={handleExternalValueConsumed}
+              thinkingMode={thinkingMode}
+              onThinkingModeChange={setThinkingMode}
             />
           </>
         )}

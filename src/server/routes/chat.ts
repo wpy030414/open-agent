@@ -1,12 +1,15 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
+import path from 'path'
+import fs from 'fs'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
 import { eq } from 'drizzle-orm'
 import { runChatLoop } from '../ai/loop.js'
-import type { ChatMessage } from '../ai/provider.js'
+import type { ChatMessage, ContentPart } from '../ai/provider.js'
 import type { ServerMessage } from '../../shared/types.js'
 import { randomUUID } from 'crypto'
+import { parseAttachment } from '../files/parser.js'
 
 export const chatRoute = new Hono()
 
@@ -19,13 +22,14 @@ chatRoute.get('/health', (c) => {
  * Standard HTTP, no WebSocket needed. Works through any proxy.
  */
 chatRoute.post('/', async (c) => {
-  const userId = c.req.header('x-user') || ''
+  const rawUserId = c.req.header('x-user') || ''
+  const userId = (() => { try { return decodeURIComponent(rawUserId) } catch { return rawUserId } })()
   if (!userId) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const body = await c.req.json<{ message: string; conversation_id?: string; _retry?: boolean }>()
-  const { message, conversation_id, _retry } = body
+  const body = await c.req.json<{ message: string; conversation_id?: string; _retry?: boolean; thinking_mode?: boolean; attachments?: Array<{ url: string; name: string; size: number; type: string }> }>()
+  const { message, conversation_id, _retry, thinking_mode, attachments } = body
 
   if (!message?.trim()) {
     return c.json({ error: 'Empty message' }, 400)
@@ -81,6 +85,7 @@ chatRoute.post('/', async (c) => {
           conversation_id: convId,
           role: 'user',
           content: message,
+          attachments: attachments ? JSON.stringify(attachments) : null,
           created_at: now,
         }).run()
       }
@@ -106,8 +111,52 @@ chatRoute.post('/', async (c) => {
       // --- Tell client the conversation ID ---
       send({ type: 'conversation_id', id: convId })
 
+      // --- Parse attachments and build user message ---
+      let userMessage: string | ContentPart[] = message
+
+      if (attachments && attachments.length > 0) {
+        const textParts: string[] = []
+        const imageParts: ContentPart[] = []
+
+        for (const att of attachments) {
+          // Map URL to disk path: extract filename from URL
+          // Supports both /uploads/xxx and /api/upload/file/xxx
+          const filename = att.url.split('/').pop() || ''
+          const diskPath = path.join('uploads', filename)
+          if (!fs.existsSync(diskPath)) {
+            textParts.push(`[附件 ${att.name}: 文件未找到]`)
+            continue
+          }
+
+          try {
+            const parsed = await parseAttachment(diskPath, att.name, att.type)
+
+            if (parsed.kind === 'image') {
+              imageParts.push({ type: 'image_url', image_url: { url: parsed.base64! } })
+              textParts.push(`[图片: ${att.name}]`)
+            } else if (parsed.kind === 'text') {
+              textParts.push(`\n--- 附件: ${att.name} ---\n${parsed.content}\n---`)
+            } else {
+              textParts.push(parsed.content)
+            }
+          } catch (err) {
+            textParts.push(`[附件 ${att.name}: 解析失败 - ${(err as Error).message}]`)
+          }
+        }
+
+        // Build the message to send to the model
+        if (imageParts.length > 0) {
+          // Multimodal: text + images
+          const content: ContentPart[] = [{ type: 'text', text: message + textParts.join('\n') }, ...imageParts]
+          userMessage = content
+        } else {
+          // Text-only
+          userMessage = message + textParts.join('\n')
+        }
+      }
+
       // --- Run AI loop ---
-      const { reply, suggestions, thinking } = await runChatLoop(message, history, send)
+      const { reply, suggestions, thinking } = await runChatLoop(userMessage, history, send, undefined, thinking_mode !== false)
 
       // --- Save assistant message ---
       if (reply) {

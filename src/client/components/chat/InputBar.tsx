@@ -1,19 +1,38 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Send } from 'lucide-react'
+import { Brain, Paperclip, X, Upload } from 'lucide-react'
+
+interface Attachment {
+  url: string
+  name: string
+  size: number
+  type: string
+}
+
+interface Attachment {
+  url: string
+  name: string
+  size: number
+  type: string
+}
 
 interface InputBarProps {
-  onSend: (text: string) => void
+  onSend: (text: string, attachments?: Attachment[]) => void
   disabled?: boolean
   /** External value to pre-fill the textarea (e.g. after revert) */
   externalValue?: string
   onExternalValueConsumed?: () => void
+  thinkingMode: boolean
+  onThinkingModeChange: (enabled: boolean) => void
 }
 
-export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed }: InputBarProps) {
+export function InputBar({ onSend, disabled, externalValue, onExternalValueConsumed, thinkingMode, onThinkingModeChange }: InputBarProps) {
   const { t } = useTranslation()
   const [text, setText] = useState('')
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [uploading, setUploading] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // When externalValue changes, fill the textarea and focus it
   useEffect(() => {
@@ -33,9 +52,10 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
 
   const handleSend = () => {
     const trimmed = text.trim()
-    if (!trimmed || disabled) return
-    onSend(trimmed)
+    if ((!trimmed && attachments.length === 0) || disabled || uploading) return
+    onSend(trimmed, attachments.length > 0 ? attachments : undefined)
     setText('')
+    setAttachments([])
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
@@ -55,11 +75,67 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
     }
   }
 
-  const hasText = text.trim().length > 0
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    setUploading(true)
+    try {
+      const newAttachments: Attachment[] = []
+      for (const file of Array.from(files)) {
+        const formData = new FormData()
+        formData.append('file', file)
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: res.statusText }))
+          throw new Error(err.error || `Upload failed: ${file.name}`)
+        }
+        const data = await res.json()
+        newAttachments.push(data)
+      }
+      setAttachments((prev) => [...prev, ...newAttachments])
+    } catch (err) {
+      console.error('Upload failed:', err)
+      // Could show a toast here
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const hasContent = text.trim().length > 0 || attachments.length > 0
 
   return (
     <div className="max-w-3xl mx-auto w-full px-4 pb-4">
-      <div className="relative rounded-xl border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring transition-shadow">
+      <div className="rounded-xl border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring transition-shadow">
+        {/* Attachment chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {attachments.map((att, idx) => (
+              <div
+                key={idx}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted text-xs max-w-[200px]"
+              >
+                <Paperclip className="h-3 w-3 flex-shrink-0" />
+                <span className="truncate">{att.name}</span>
+                <button
+                  onClick={() => removeAttachment(idx)}
+                  className="ml-0.5 hover:text-destructive flex-shrink-0"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           value={text}
@@ -69,17 +145,53 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
           placeholder={t('chat.inputPlaceholder')}
           disabled={disabled}
           rows={1}
-          className="w-full resize-none bg-transparent text-sm focus:outline-none disabled:opacity-50 max-h-[200px] pr-10"
+          className="w-full resize-none bg-transparent text-sm focus:outline-none disabled:opacity-50 max-h-[200px]"
         />
-        {hasText && (
+        <div className="flex items-center justify-between pt-1">
           <button
-            onClick={handleSend}
-            disabled={disabled}
-            className="absolute right-2 bottom-2 w-7 h-7 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center"
+            onClick={() => onThinkingModeChange(!thinkingMode)}
+            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-colors ${
+              thinkingMode
+                ? 'bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+            }`}
+            title={t('chat.deepThinking')}
           >
-            <Send className="h-3.5 w-3.5" />
+            <Brain className="h-3.5 w-3.5" />
+            <span>{t('chat.deepThinking')}</span>
           </button>
-        )}
+          <div className="flex items-center gap-2">
+            {/* Attachment button */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || uploading}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title={t('chat.addAttachment')}
+            >
+              {uploading ? (
+                <Upload className="h-3.5 w-3.5 animate-pulse" />
+              ) : (
+                <Paperclip className="h-3.5 w-3.5" />
+              )}
+              <span>{uploading ? t('chat.uploading') : t('chat.addAttachment')}</span>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+            {/* Send button — text style */}
+            <button
+              onClick={handleSend}
+              disabled={disabled || uploading || !hasContent}
+              className="px-3 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+            >
+              {t('chat.send')}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageContent } from './MessageContent'
 import { ThinkingBlock } from './ThinkingBlock'
+import { AttachmentList } from './AttachmentCard'
 import { User, Bot, Undo2, Check, X } from 'lucide-react'
+import type { Attachment } from '@/shared/types'
 
 interface ChatMessage {
   id?: number
@@ -11,6 +13,7 @@ interface ChatMessage {
   thinking?: string
   toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string }>
   suggestions?: string[]
+  attachments?: Attachment[]
   streaming?: boolean
 }
 
@@ -53,6 +56,13 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
                   {tc.result && <span className="text-muted-foreground ml-2">→ {tc.result}</span>}
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Attachments */}
+          {message.attachments && message.attachments.length > 0 && (
+            <div className={`mb-2 ${isUser ? 'flex flex-wrap gap-1.5 justify-end' : ''}`}>
+              <AttachmentList attachments={message.attachments} />
             </div>
           )}
 

@@ -17,6 +17,7 @@ export const messages = sqliteTable('messages', {
   tool_calls: text('tool_calls'),
   tool_call_id: text('tool_call_id'),
   suggestions: text('suggestions'),
+  attachments: text('attachments'),
   created_at: integer('created_at').notNull(),
 })
 

@@ -15,6 +15,7 @@ import { conversationsRoute } from './routes/conversations.js'
 import { adminRoute } from './routes/admin.js'
 import { pluginsRoute } from './routes/plugins.js'
 import { chatRoute } from './routes/chat.js'
+import { uploadRoute } from './routes/upload.js'
 
 const app = new Hono()
 
@@ -31,6 +32,7 @@ app.route('/api/conversations', conversationsRoute)
 app.route('/api/admin', adminRoute)
 app.route('/api/plugins', pluginsRoute)
 app.route('/api/chat', chatRoute)
+app.route('/api/upload', uploadRoute)
 
 // Static files (production build only)
 const clientDist = path.resolve('dist/client')

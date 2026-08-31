@@ -5,7 +5,8 @@ import { eq, and, desc, gte } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 
 function getUserId(c: any): string {
-  return c.req.header('x-user') || ''
+  const raw = c.req.header('x-user') || ''
+  try { return decodeURIComponent(raw) } catch { return raw }
 }
 
 export const conversationsRoute = new Hono()
@@ -30,7 +31,15 @@ conversationsRoute.get('/:id', async (c) => {
 
   const msgs = await db.select().from(messages).where(eq(messages.conversation_id, id)).orderBy(messages.created_at).all()
 
-  return c.json({ conversation: conv, messages: msgs })
+  return c.json({
+    conversation: conv,
+    messages: msgs.map((m) => ({
+      ...m,
+      tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : null,
+      suggestions: m.suggestions ? JSON.parse(m.suggestions) : null,
+      attachments: m.attachments ? JSON.parse(m.attachments) : null,
+    })),
+  })
 })
 
 // Create a new conversation
