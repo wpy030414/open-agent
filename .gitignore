@@ -19,7 +19,7 @@ Thumbs.db
 .env.local
 
 # 数据库文件
-data/*.db
+data/
 uploads/
 
 # IDE

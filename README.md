@@ -1,6 +1,6 @@
 # Open Agent
 
-轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过插件扩展工具能力，通过技能注入系统提示词，支持文件附件多模态交互，一切由管理员密钥统一管理。
+轻量级、可自托管的 Web AI 智能体平台。与 AI 对话，通过内置工具执行文件读写、网络请求、文档处理等任务，通过技能注入系统提示词，支持文件附件多模态交互，一切由管理员密钥统一管理。
 
 ## 核心特性
 
@@ -8,14 +8,14 @@
 - **流式对话** — React + shadcn/ui 聊天界面，SSE 实时流式输出（token、思考过程、工具调用）
 - **思考模式** — 支持 AI 扩展推理（DashScope 兼容 `enable_thinking`），可折叠展示思考过程
 - **文件附件** — 支持图片（多模态）、Excel（转 CSV）、PDF（提取文本）等附件，管理员可开关
-- **插件系统** — JSON 清单 + TS/JS 模块，支持 function calling 自动调用
-- **技能系统** — SKILL.md 文件注入系统提示词，为 AI 注入领域知识
+- **内置工具系统** — AI 可执行文件读写、网络请求、文档处理（DOCX/PPTX/XLSX/PDF），沙盒隔离
+- **技能系统** — SKILL.md 摘要注入系统提示词，完整内容通过 `load_skill` 工具按需加载
 - **Mermaid 图表** — AI 回复中的 mermaid 代码块自动渲染为图表
 - **后续建议** — AI 每次回复末尾自动生成 3 条可点击的追问建议
 - **消息回退** — 可从任意历史消息处回退，删除该消息及之后所有消息
 - **对话导出** — 将对话导出为格式化 TXT 文件
 - **统计面板** — 管理员可查看用户/对话/消息统计，浏览所有对话和消息
-- **管理员面板** — 密钥认证 + JWT，在线修改模型、提示词、品牌、插件/技能
+- **管理员面板** — 密钥认证 + JWT，在线修改模型、提示词、品牌、技能
 - **白标品牌** — 自定义应用名称、Favicon、聊天背景图
 - **持久化存储** — SQLite 单文件数据库，对话历史自动保存
 - **国际化** — 中文/英文双语支持
@@ -64,54 +64,26 @@ pnpm dev
 - **品牌** — 修改应用名称、Favicon、聊天背景图
 - **模型** — 修改 API 地址、密钥、模型名称
 - **提示词** — 编辑系统提示词
-- **插件** — 上传/卸载插件（.zip 文件）
 - **技能** — 上传/卸载技能（.zip 文件）
 - **统计** — 查看用户数、对话数、消息数，浏览所有对话详情
 
-## 插件开发
+## 内置工具
 
-插件放在 `plugins/` 目录下：
+AI 在对话中可自动调用以下内置工具（沙盒隔离，每对话独立工作区）：
 
-```
-plugins/my-plugin/
-├── plugin.json    # 清单文件：名称、版本、工具定义
-├── index.ts       # 导出 execute(toolName, input) 函数
-└── README.md
-```
+| 工具 | 说明 |
+|------|------|
+| `read_file` | 读取工作区文件（text/base64） |
+| `write_file` | 写入文件到工作区（产物可下载） |
+| `list_files` | 列出工作区文件 |
+| `delete_file` | 删除工作区文件 |
+| `http_request` | 发起出站 HTTP 请求（SSRF 防护） |
+| `read_document` | 读取文档内容（DOCX/DOC/PPTX/XLSX/XLS/PDF/CSV） |
+| `write_document` | 生成文档文件（DOCX/PPTX/XLSX，产物可下载） |
+| `load_skill` | 按需加载技能完整内容 |
+| `list_skill_files` | 列出技能目录中的文件 |
 
-**plugin.json：**
-```json
-{
-  "name": "my-plugin",
-  "version": "1.0.0",
-  "description": "一个有用的插件",
-  "tools": [
-    {
-      "name": "search",
-      "description": "搜索某些内容",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "query": { "type": "string", "description": "搜索关键词" }
-        },
-        "required": ["query"]
-      }
-    }
-  ]
-}
-```
-
-**index.ts：**
-```typescript
-export async function execute(toolName: string, input: Record<string, unknown>): Promise<unknown> {
-  if (toolName === 'search') {
-    return { results: [`搜索结果: ${input.query}`] }
-  }
-  throw new Error(`Unknown tool: ${toolName}`)
-}
-```
-
-工具在 AI 调用时自动以 `{插件名}_{工具名}` 格式暴露（如 `my-plugin_search`）。
+所有工具在 `data/workspaces/{conversationId}/` 沙盒内执行，防止访问宿主文件系统。详见 `docs/specs/module-tool-system.md`。
 
 ## 技能开发
 
@@ -137,7 +109,7 @@ version: 1.0.0
 3. 提供相关示例
 ```
 
-技能内容会在每次对话时自动注入系统提示词的 `## Available Skills` 部分。
+技能的名称和描述会在每次对话时注入系统提示词的 `## Available Skills` 部分，完整内容通过 `load_skill` 工具按需加载。
 
 ## 生产部署
 
@@ -181,14 +153,13 @@ open-agent/
 │   │   └── styles/      # 全局 CSS（主题变量、滚动条、Mermaid）
 │   └── server/          # Hono 后端（入口：index.ts）
 │       ├── ai/          # AI 提供商客户端 + function calling 循环
-│       ├── plugins/     # 插件加载、执行、注册
+│       ├── tools/       # 内置工具（文件/网络/文档/技能）+ 沙盒文件系统
 │       ├── skills/      # 技能加载和注册
 │       ├── files/       # 文件附件解析（图片、Excel、PDF、文本）
 │       ├── middleware/   # 用户 JWT 认证中间件
-│       └── routes/      # API 路由（chat、conversations、admin、plugins、upload、user）
-├── plugins/             # 已安装的插件目录
+│       └── routes/      # API 路由（chat、conversations、admin、upload、user、workspace）
 ├── skills/              # 已安装的技能目录
-├── data/                # SQLite 数据库文件
+├── data/                # SQLite 数据库 + 对话工作区（workspaces/）
 ├── uploads/             # 用户上传的文件附件
 └── docs/                # 项目文档
 ```
