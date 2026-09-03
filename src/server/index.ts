@@ -16,6 +16,7 @@ import { appRoute } from './routes/app.js'
 import { chatRoute } from './routes/chat.js'
 import { uploadRoute } from './routes/upload.js'
 import { userRoute } from './routes/user.js'
+import { workspaceRoute } from './routes/workspace.js'
 import { serveClient } from './static.js'
 
 const app = new Hono()
@@ -35,6 +36,7 @@ app.route('/api/app-name', appRoute)
 app.route('/api/chat', chatRoute)
 app.route('/api/upload', uploadRoute)
 app.route('/api/user', userRoute)
+app.route('/api/workspace', workspaceRoute)
 
 // Static files (production build only)
 if (fs.existsSync(path.join('dist/client', 'index.html'))) {
