@@ -151,6 +151,8 @@
 - 原生支持 TypeScript ESM
 - 单一工具完成 watch + 执行，减少依赖
 
+> 相关：Windows 管道 stdio 环境下的一个限制及其规避方式见 [D15](#d15手写静态托管替代-hononode-serverserve-static)。
+
 ---
 
 ## D9：tsup 构建服务端
@@ -281,3 +283,24 @@
 - `messages` 表 `thinking` 列持久化推理过程
 - 关闭思考时 provider 不 yield `thinking` 事件
 - 该参数为 DashScope 约定，对严格 OpenAI 规范的端点可能被忽略（无副作用，模型自行决定）
+
+---
+
+## D15：手写静态托管替代 @hono/node-server/serve-static
+
+**日期**：2026-09-03
+
+**背景**：`pnpm dev`（concurrently 并行启动前后端）时后端静默挂死——零输出、端口不监听，而单独 `pnpm dev:server` 完全正常。隔离实验（平凡入口 + 逐模块二分）定位为：Windows 上当 stdout 是管道（concurrently 的标准接法）时，入口模块图引用 `@hono/node-server/serve-static` 会使 `tsx watch` 在执行任何代码前挂死。上游 [privatenumber/tsx#623](https://github.com/privatenumber/tsx/issues/623) 记录了同类现象（chalk、prom-client 等「可疑模块」触发），至今未修复。
+
+**决策**：新增 `src/server/static.ts` 手写极简静态中间件（`/assets/*` 文件 + SPA fallback + 路径穿越守卫），依赖图彻底移除 `@hono/node-server/serve-static`。
+
+**备选与权衡**：
+- ❌ 升级 `@hono/node-server` 1.19.17 → 2.1.1：实测 2.1.1 的 serve-static 照样触发挂死
+- ❌ 改为动态 `import()`：tsx watch 启动时即解析整个模块图，动态导入同样挂死
+- ❌ 换 `node --watch --import tsx`：管道下能启动，但 Windows 重启存在 EADDRINUSE 竞态（旧进程端口未释放 → 新进程绑定失败 → 服务停摆，需再改一次文件才能恢复）
+- ❌ 换 nodemon + tsx（no watch）：可行，但为规避单个子模块引入整个新工具链，且偏离 D8 已选定的 tsx watch 路线
+
+**影响**：
+- dev 行为不变：`dist/client` 不存在时中间件完全不注册
+- 生产行为对齐原 serveStatic 语义（含未命中路径回落 `index.html`——未知 `/api/*` 路径也会返回 SPA，与原 `app.get('*', serveStatic({ path: 'index.html' }))` 行为一致）
+- 附带修复：vite 代理端口改为跟随 `.env` 的 `PORT`（原先写死 3001，`.env` 配置其他端口时前端请求全部 502）
