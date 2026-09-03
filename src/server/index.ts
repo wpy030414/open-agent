@@ -1,7 +1,6 @@
 import 'dotenv/config'
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
-import { serveStatic } from '@hono/node-server/serve-static'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import path from 'path'
@@ -17,6 +16,7 @@ import { pluginsRoute } from './routes/plugins.js'
 import { chatRoute } from './routes/chat.js'
 import { uploadRoute } from './routes/upload.js'
 import { userRoute } from './routes/user.js'
+import { serveClient } from './static.js'
 
 const app = new Hono()
 
@@ -37,10 +37,8 @@ app.route('/api/upload', uploadRoute)
 app.route('/api/user', userRoute)
 
 // Static files (production build only)
-const clientDist = 'dist/client'
-if (fs.existsSync(path.join(clientDist, 'index.html'))) {
-  app.use('/assets/*', serveStatic({ root: clientDist }))
-  app.get('*', serveStatic({ root: clientDist, path: 'index.html' }))
+if (fs.existsSync(path.join('dist/client', 'index.html'))) {
+  app.use('*', serveClient)
 }
 
 // Start server
