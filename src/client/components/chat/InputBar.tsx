@@ -114,10 +114,10 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
 
   return (
     <div className="max-w-3xl mx-auto w-full px-4 pb-4">
-      <div className="rounded-xl border bg-background px-3 py-2 focus-within:ring-2 focus-within:ring-ring transition-shadow">
+      <div className="rounded-xl border bg-background px-4 py-3 focus-within:ring-2 focus-within:ring-ring transition-shadow">
         {/* Attachment chips */}
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
+          <div className="flex flex-wrap gap-1.5 mb-3">
             {attachments.map((att, idx) => (
               <div
                 key={idx}
@@ -158,13 +158,13 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
           onInput={handleInput}
           placeholder={t('chat.inputPlaceholder')}
           disabled={disabled}
-          rows={1}
-          className="w-full resize-none bg-transparent text-sm focus:outline-none disabled:opacity-50 max-h-[200px]"
+          rows={3}
+          className="w-full resize-none bg-transparent text-sm focus:outline-none disabled:opacity-50 max-h-[200px] leading-relaxed py-1"
         />
-        <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center justify-between pt-2">
           <button
             onClick={() => onThinkingModeChange(!thinkingMode)}
-            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-colors ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
               thinkingMode
                 ? 'bg-primary/10 text-primary'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -180,7 +180,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || uploading}
-                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 title={t('chat.addAttachment')}
               >
                 {uploading ? (
@@ -202,7 +202,7 @@ export function InputBar({ onSend, disabled, externalValue, onExternalValueConsu
             <button
               onClick={handleSend}
               disabled={disabled || uploading || !hasContent}
-              className="px-3 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              className="px-4 py-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
               {t('chat.send')}
             </button>
