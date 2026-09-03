@@ -63,23 +63,28 @@
 
 ---
 
-## D4：技能注入系统提示词
+## D4：技能注入系统提示词（已演进为按需加载）
 
-**日期**：架构确立时
+**日期**：架构确立时，2026-09 演进为按需加载
 
 **背景**：需要为 AI 注入领域知识和行为准则。
 
-**决策**：将技能 SKILL.md 的 Markdown 内容直接拼接到系统提示词末尾。
+**决策**：系统提示词中**仅注入技能摘要**（名称 + 描述），完整内容通过 `load_skill` 工具按需加载。
 
 **原因**：
-- 简单直接，无需复杂的 prompt engineering 框架
-- 兼容所有 OpenAI 兼容 API
-- 技能内容对用户透明，管理员可通过面板管理
+- 避免系统提示词膨胀（全文注入会占用大量 token，多个技能叠加时尤为严重）
+- 按需加载更符合成本效益（AI 只在需要时才读取完整内容）
+- 支持复杂技能结构（`references/*.md`、子技能 `skills/*/SKILL.md`），AI 可通过 `list_skill_files` 发现并用 `load_skill` 加载
 
 **实现细节**：
-- `buildSystemPrompt()` 中按 `## Available Skills` 格式拼接
-- 每个技能以 `### {name}` 作为标题
+- `buildSystemPrompt()` 中按 `## Available Skills` 格式列出每个技能的名称和描述
+- 提供 `load_skill(name, path?)` 工具：加载 `SKILL.md` 或指定子文件（如 `references/guide.md`）
+- 提供 `list_skill_files(name)` 工具：列出技能目录下所有可读文件
 - 系统提示词末尾追加硬编码的 suggestions 格式指令（最高优先级）
+
+**演进历史**：
+- 初版（架构确立时）：全文注入 `SKILL.md` 的 Markdown 内容
+- 2026-09：演进为摘要注入 + 按需加载，解决提示词膨胀问题
 
 ---
 
@@ -104,7 +109,9 @@
 
 ---
 
-## D6：插件工具名前缀
+## D6：插件工具名前缀（已废弃）
+
+> ⚠️ **本决策已废弃。** 插件系统已移除（commit 3530176），工具系统已重建为内置能力（详见 `docs/specs/module-tool-system.md`）。内置工具无需前缀，直接以工具名注册（如 `read_file`、`http_request`）。
 
 **日期**：架构确立时
 

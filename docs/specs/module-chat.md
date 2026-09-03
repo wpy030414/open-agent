@@ -11,7 +11,7 @@
 | `src/server/routes/chat.ts` | SSE 流式端点 `POST /api/chat`、附件拼装、对话创建 |
 | `src/server/ai/loop.ts` | 聊天循环：系统提示词构建 + 工具调用 + suggestions 解析 |
 | `src/server/ai/provider.ts` | OpenAI 兼容 API 流式客户端（含多模态与 thinking 参数） |
-| `src/server/ai/tools.ts` | 工具注册表（聚合所有插件工具） |
+| `src/server/ai/tools.ts` | 工具注册表（委托到内置工具 registry） |
 | `src/client/hooks/useChat.ts` | 客户端聊天状态管理 + SSE 解析 + 重试 + 哈希路由 |
 
 ## 接口契约
@@ -45,7 +45,7 @@
 | `token` | `{ text: string }` | 文本增量 token |
 | `thinking` | `{ text: string }` | 思考过程增量 token |
 | `tool_call` | `{ name: string, input: object }` | 工具调用开始 |
-| `tool_result` | `{ name: string, summary: string }` | 工具调用结果摘要 |
+| `tool_result` | `{ name: string, summary: string, artifacts?: ToolArtifact[] }` | 工具调用结果摘要（含可选产物文件） |
 | `done` | `{ reply: string, suggestions: string[] }` | 对话完成（终止事件） |
 | `error` | `{ message: string }` | 错误（终止事件） |
 
@@ -76,8 +76,9 @@
 2. **工具循环上限**：最多 5 轮（`MAX_TOOL_ROUNDS`）；超出后发送 `done`，reply 固定为 `(Reached maximum tool call rounds)`
 3. **系统提示词构建**（`buildSystemPrompt`）：
    - 基础内容 = `config.system_prompt`
-   - 若存在技能，追加 `## Available Skills` + 每个技能 `### {name}\n{content}`
+   - 若存在技能，追加 `## Available Skills` + 每个技能的名称和描述摘要（完整内容通过 `load_skill` 工具按需加载）
    - 思考模式关闭时追加 `\n\n/no_think\n请直接回答问题，不要输出任何思考过程或推理步骤。`
+   - 追加工具使用规范（防止 write_file 死循环等）
    - **最后**追加硬编码的 `## 输出格式（最高优先级，不得省略）` suggestions 指令 —— 置于末尾以保证即使 system_prompt 是强人设也不会吞掉格式要求
 4. **Suggestions 围栏扣留**：见 `DECISIONS.md` D10
 5. **Suggestions 解析**（`parseSuggestions`）：
@@ -104,7 +105,7 @@
    - 新建/删除当前对话 → 清除 hash
    - 监听 `hashchange` 支持浏览器前进后退；加载失败（越权/不存在）则清除 hash 回到初始页
 9. **导出**：客户端拼接 `# 标题` + 每条 `### 🧑 User` / `### 🤖 Assistant`，以 `---` 分隔，生成 `.txt` 下载；文件名过滤 `\/:*?"<>|`
-10. **插件手调**：`callPlugin` 走 `POST /api/plugins/call`，结果以独立助手气泡展示（JSON 代码块），不进对话历史
+10. **工具调用**：内置工具（`read_file`、`write_file`、`http_request`、`read_document`、`write_document`、`load_skill` 等）由 AI 通过 function calling 自动调用，结果以独立助手气泡展示。详见 `specs/module-tool-system.md`
 
 ## 上游 API 客户端（provider.ts）
 
