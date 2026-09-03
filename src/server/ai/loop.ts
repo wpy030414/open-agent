@@ -31,8 +31,7 @@ export async function runChatLoop(
     signal,
   }
   const producedArtifacts: ToolArtifact[] = []
-  let writeFileCount = 0
-  let writeFileRefused = false // once true, any further write_file calls force-terminate the loop
+  let writeFileCount = 0 // 用于本回合 write_file 调用次数的温和提醒
 
   // Build system prompt with skill hints
   const systemPrompt = buildSystemPrompt(config, thinkingMode)
@@ -49,9 +48,19 @@ export async function runChatLoop(
   let toolMessages: ChatMessage[] = []
   let fullThinking = ''
 
+  // Pi 的设计理念：外层循环决定「下一步做什么」，程序提供能力并执行，
+  // 循环把两者接起来。MAX_TOOL_ROUNDS 是最终安全网 —— 但每一条出口都必须发终态，
+  // 绝不让客户端永远等不到 done/error。
+  //
+  // 跨轮追忆：工具轮撞顶或工具阶段被终止时，用最近一次流式正文兜底成一个非空 reply。
+  let lastFullText = ''
+  // 连续重复批检测：模型在同一个 (tool+args) 批上反复打转（如反复 load_skill openyida）
+  // 视为漂移，强制终止 —— 等价于 Pi 的 batch.terminate。
+  let lastToolBatchSig = ''
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (signal?.aborted) {
-      send({ type: 'error', message: 'Cancelled' })
+      send({ type: 'error', message: '已取消' })
       return { reply: '', suggestions: [], thinking: fullThinking }
     }
 
@@ -117,9 +126,49 @@ export async function runChatLoop(
       return { reply: '', suggestions: [], thinking: fullThinking }
     }
 
-    // Tool calls — execute each tool and feed results back to the LLM
-    if (finishReason === 'tool_calls' && pendingCalls.length > 0) {
-      let forceBreak = false
+    // 用户中途取消同样要给终态
+    if (signal?.aborted) {
+      send({ type: 'error', message: '已取消' })
+      return { reply: '', suggestions: [], thinking: fullThinking }
+    }
+
+    // 保底追忆上一轮流式正文（可能既有文本又夹带工具调用）
+    if (fullText) {
+      lastFullText = fullText
+    }
+
+    const hasToolCalls = pendingCalls.length > 0
+
+    // ---- Pi: stopReason === 'length'（输出 token 上限被截断）----
+    // 参数不可信，不执行；把「未执行」作为错误结果回填，让模型尽快用文本收尾。
+    if (hasToolCalls && finishReason === 'length') {
+      for (const call of pendingCalls) {
+        const summary = `工具 "${call.name}" 未执行：响应触发了输出 token 上限，参数可能被截断。请重新发起完整参数，或直接根据已有信息作答。`
+        send({ type: 'tool_call', name: call.name, input: {} })
+        send({ type: 'tool_result', name: call.name, summary })
+        toolMessages.push({ role: 'tool', content: summary, tool_call_id: call.id })
+      }
+      if (round === MAX_TOOL_ROUNDS - 1) break // 没有下一轮了，落到统一收口
+      continue
+    }
+
+    // ---- Tool calls 阶段（Pi: executeToolCalls，可终止）----
+    if (hasToolCalls) {
+      const batchSig = pendingCalls.map((c) => `${c.name}:${c.arguments}`).join('|')
+
+      // 连续重复同一批工具 → 模型漂移，强制终止（等价于 Pi 的 batch.terminate）
+      if (batchSig && batchSig === lastToolBatchSig) {
+        const msg = '你已连续调用完全相同的工具两次。立即停止调用工具，直接根据已有信息用中文回答用户。'
+        for (const call of pendingCalls) {
+          send({ type: 'tool_call', name: call.name, input: {} })
+          send({ type: 'tool_result', name: call.name, summary: `BLOCKED: ${msg}` })
+          toolMessages.push({ role: 'tool', content: `BLOCKED: ${msg}`, tool_call_id: call.id })
+        }
+        lastToolBatchSig = '' // 复位，收口兜底用的 lastFullText 不受影响
+        break // 工具阶段终止 → 落到统一收口，保证有终态
+      }
+      lastToolBatchSig = batchSig
+
       for (const call of pendingCalls) {
         let input: Record<string, unknown>
         try {
@@ -128,7 +177,7 @@ export async function runChatLoop(
           input = {}
         }
 
-        // Resolve and execute tool (write_file guard prevents infinite loops)
+        // Resolve and execute tool
         const toolModule = resolveTool(call.name)
         let result: ToolResult
 
@@ -136,17 +185,13 @@ export async function runChatLoop(
           result = { summary: `Unknown tool: ${call.name}`, error: true }
         } else if (call.name === 'write_file') {
           writeFileCount++
-          if (writeFileRefused) {
-            // Already refused once — AI is being stubborn, force-terminate
-            send({ type: 'tool_call', name: call.name, input })
-            send({ type: 'tool_result', name: call.name, summary: 'BLOCKED: write_file permanently disabled this turn.' })
-            forceBreak = true
-            break
-          } else if (writeFileCount > 1) {
-            writeFileRefused = true
+          if (writeFileCount > 1) {
+            // 已是本回合第 2 次写文件：温和提醒，不再永久禁用。
+            // 写文件是合法操作，Pi 的理念是「不硬禁工具、靠收敛」——真正的死循环
+            // 由连续同批检测 + 轮数兜底负责终止。
             result = {
-              summary: `Refused: write_file already called. STOP writing files. Reply to the user with your final answer NOW.`,
-              error: true,
+              summary: `提示：write_file 已经是第 ${writeFileCount} 次调用。写完当前文件后请直接回复用户，不要再调用更多工具。`,
+              error: false,
             }
           } else {
             try {
@@ -184,11 +229,11 @@ export async function runChatLoop(
         })
       }
 
-      if (forceBreak) break // exit the tool loop entirely
-      continue // next round
+      if (round === MAX_TOOL_ROUNDS - 1) break // 已是最后一轮，不再尝试新工具 → 收口
+      continue // 正常执行完一批工具，下一轮
     }
 
-    // Final answer — parse suggestions
+    // ---- Final answer：不带工具、直接作答的一轮 ----
     const { reply, suggestions } = parseSuggestions(fullText)
 
     // Flush pending buffer (last SUGGESTIONS_FENCE.length chars withheld during streaming)
@@ -206,9 +251,15 @@ export async function runChatLoop(
     return { reply, suggestions, thinking: fullThinking, artifacts: producedArtifacts.length > 0 ? producedArtifacts : undefined }
   }
 
-  // Max rounds exceeded
-  send({ type: 'done', reply: '(Reached maximum tool call rounds)', suggestions: [] })
-  return { reply: '', suggestions: [], thinking: fullThinking, artifacts: producedArtifacts.length > 0 ? producedArtifacts : undefined }
+  // ---- 统一收口（Pi: 每一条路径都有 agent_end，绝不静默 return）----
+  // 走到这里只有三种情况：轮数撞顶、工具阶段被终止、最后几轮全是工具调用。
+  // 无论哪种，都用最近一次流式正文兜底，实在没有正文才给出明确提示——绝不给空 reply。
+  const { reply: baseReply, suggestions: baseSugg } = parseSuggestions(lastFullText)
+  // 兜底回复可能自带 fence 代码块（模型在正文里也画了一个），会被 seen 隐藏；这里再剥一层
+  const finalText = baseReply.trim().replace(new RegExp(SUGGESTIONS_FENCE + '[\\s\\S]*$'), '').trim()
+  const reply = finalText || '（已完成思考但未能给出有效回答：已中止反复的工具调用。请换一种问法重试。）'
+  send({ type: 'done', reply, suggestions: baseSugg })
+  return { reply, suggestions: baseSugg, thinking: fullThinking, artifacts: producedArtifacts.length > 0 ? producedArtifacts : undefined }
 }
 
 function buildSystemPrompt(config: AppConfig, thinkingMode: boolean): string {
@@ -241,6 +292,7 @@ function buildSystemPrompt(config: AppConfig, thinkingMode: boolean): string {
 - 每次写文件只用一个确定的文件名，不要每次生成新文件名。
 - 如果用户要求"写一个文件"，写一次就够了。不要用不同的文件名重复创建。
 - 写完文件后，用自然语言告诉用户文件已创建，不要再次调用工具。
+- 工具结果通常会直接给出答案所需的信息：不要重复调用同一个工具、不要反复加载同一个技能，加载一次就足够。
 
 ## 输出格式（最高优先级，不得省略）
 每一条回复的【最末尾】必须输出一个 \`\`\`suggestions 代码块，里面恰好 3 个后续建议（每行一条，以 - 开头）。

@@ -18,8 +18,9 @@ Thumbs.db
 .env
 .env.local
 
-# 数据库文件
+# 使用数据
 data/
+skills/
 uploads/
 
 # IDE
