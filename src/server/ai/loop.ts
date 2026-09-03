@@ -4,6 +4,9 @@ import { streamChatCompletion } from './provider.js'
 import { getAllTools } from './tools.js'
 import { getConfig } from '../config.js'
 import { skillRegistry } from '../skills/registry.js'
+import { resolveTool } from '../tools/registry.js'
+import { SandboxFS } from '../tools/workspace.js'
+import type { ToolContext, ToolResult, ToolArtifact } from '../tools/types.js'
 import { MAX_TOOL_ROUNDS, MAX_HISTORY_MESSAGES, SUGGESTIONS_FENCE } from '../../shared/constants.js'
 
 type SendFn = (msg: ServerMessage) => void
@@ -14,9 +17,22 @@ export async function runChatLoop(
   send: SendFn,
   signal?: AbortSignal,
   thinkingMode = true,
-): Promise<{ reply: string; suggestions: string[]; thinking: string }> {
+  conversationId?: string,
+  userId?: string,
+): Promise<{ reply: string; suggestions: string[]; thinking: string; artifacts?: ToolArtifact[] }> {
   const config = await getConfig()
   const tools = getAllTools()
+
+  // Build tool context for sandbox filesystem
+  const toolContext: ToolContext = {
+    conversationId: conversationId || 'default',
+    userId: userId || 'anonymous',
+    workspace: new SandboxFS(conversationId || 'default'),
+    signal,
+  }
+  const producedArtifacts: ToolArtifact[] = []
+  let writeFileCount = 0
+  let writeFileRefused = false // once true, any further write_file calls force-terminate the loop
 
   // Build system prompt with skill hints
   const systemPrompt = buildSystemPrompt(config, thinkingMode)
@@ -101,10 +117,75 @@ export async function runChatLoop(
       return { reply: '', suggestions: [], thinking: fullThinking }
     }
 
-    // Tool calls → no longer supported (plugin system removed)
+    // Tool calls — execute each tool and feed results back to the LLM
     if (finishReason === 'tool_calls' && pendingCalls.length > 0) {
-      send({ type: 'error', message: 'Tool calling is no longer supported' })
-      return { reply: '', suggestions: [], thinking: fullThinking }
+      let forceBreak = false
+      for (const call of pendingCalls) {
+        let input: Record<string, unknown>
+        try {
+          input = JSON.parse(call.arguments || '{}')
+        } catch {
+          input = {}
+        }
+
+        // Resolve and execute tool (write_file guard prevents infinite loops)
+        const toolModule = resolveTool(call.name)
+        let result: ToolResult
+
+        if (!toolModule) {
+          result = { summary: `Unknown tool: ${call.name}`, error: true }
+        } else if (call.name === 'write_file') {
+          writeFileCount++
+          if (writeFileRefused) {
+            // Already refused once — AI is being stubborn, force-terminate
+            send({ type: 'tool_call', name: call.name, input })
+            send({ type: 'tool_result', name: call.name, summary: 'BLOCKED: write_file permanently disabled this turn.' })
+            forceBreak = true
+            break
+          } else if (writeFileCount > 1) {
+            writeFileRefused = true
+            result = {
+              summary: `Refused: write_file already called. STOP writing files. Reply to the user with your final answer NOW.`,
+              error: true,
+            }
+          } else {
+            try {
+              result = await toolModule.execute(input, toolContext)
+            } catch (err) {
+              result = { summary: `Tool error: ${(err as Error).message}`, error: true }
+            }
+          }
+        } else {
+          try {
+            result = await toolModule.execute(input, toolContext)
+          } catch (err) {
+            result = { summary: `Tool error: ${(err as Error).message}`, error: true }
+          }
+        }
+
+        // Notify client (exactly once per tool call)
+        send({ type: 'tool_call', name: call.name, input })
+        send({ type: 'tool_result', name: call.name, summary: result.summary, artifacts: result.artifacts })
+
+        // Collect artifacts for the response
+        if (result.artifacts?.length) {
+          producedArtifacts.push(...result.artifacts)
+        }
+
+        // Build tool result message for the LLM context
+        const toolContent = result.data
+          ? JSON.stringify(result.data).slice(0, 50_000)
+          : result.summary
+
+        toolMessages.push({
+          role: 'tool',
+          content: toolContent,
+          tool_call_id: call.id,
+        })
+      }
+
+      if (forceBreak) break // exit the tool loop entirely
+      continue // next round
     }
 
     // Final answer — parse suggestions
@@ -122,23 +203,24 @@ export async function runChatLoop(
     }
 
     send({ type: 'done', reply, suggestions })
-    return { reply, suggestions, thinking: fullThinking }
+    return { reply, suggestions, thinking: fullThinking, artifacts: producedArtifacts.length > 0 ? producedArtifacts : undefined }
   }
 
   // Max rounds exceeded
   send({ type: 'done', reply: '(Reached maximum tool call rounds)', suggestions: [] })
-  return { reply: '', suggestions: [], thinking: fullThinking }
+  return { reply: '', suggestions: [], thinking: fullThinking, artifacts: producedArtifacts.length > 0 ? producedArtifacts : undefined }
 }
 
 function buildSystemPrompt(config: AppConfig, thinkingMode: boolean): string {
   let prompt = config.system_prompt
 
-  // Append skill descriptions
+  // Append skill descriptions only (full content loaded on demand via load_skill tool)
   const skills = skillRegistry.getAll()
   if (skills.length > 0) {
     prompt += '\n\n## Available Skills\n'
+    prompt += '以下是已安装的技能摘要。如需查看某个技能的完整内容，请调用 load_skill 工具。\n'
     for (const skill of skills) {
-      prompt += `\n### ${skill.manifest.name}\n${skill.content}\n`
+      prompt += `\n- **${skill.manifest.name}**: ${skill.manifest.description}\n`
     }
   }
 
@@ -153,6 +235,12 @@ function buildSystemPrompt(config: AppConfig, thinkingMode: boolean): string {
   // when the configured system prompt is a persona/roleplay that would
   // otherwise swallow formatting instructions.
   prompt += `
+
+## 工具使用规范（必须遵守）
+- 完成一个任务后立即回复用户，不要反复修改、重写或优化同一个文件。
+- 每次写文件只用一个确定的文件名，不要每次生成新文件名。
+- 如果用户要求"写一个文件"，写一次就够了。不要用不同的文件名重复创建。
+- 写完文件后，用自然语言告诉用户文件已创建，不要再次调用工具。
 
 ## 输出格式（最高优先级，不得省略）
 每一条回复的【最末尾】必须输出一个 \`\`\`suggestions 代码块，里面恰好 3 个后续建议（每行一条，以 - 开头）。

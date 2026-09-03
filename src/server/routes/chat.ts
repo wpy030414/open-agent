@@ -7,10 +7,11 @@ import { conversations, messages } from '../schema.js'
 import { eq } from 'drizzle-orm'
 import { runChatLoop } from '../ai/loop.js'
 import type { ChatMessage, ContentPart } from '../ai/provider.js'
-import type { ServerMessage } from '../../shared/types.js'
+import type { ServerMessage, Attachment } from '../../shared/types.js'
 import { randomUUID } from 'crypto'
 import { parseAttachment } from '../files/parser.js'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
+import { SandboxFS } from '../tools/workspace.js'
 
 export const chatRoute = new Hono()
 
@@ -116,10 +117,27 @@ chatRoute.post('/', async (c) => {
 
       // --- Parse attachments and build user message ---
       let userMessage: string | ContentPart[] = message
+      const DOC_EXTS = ['.docx', '.pptx', '.xlsx', '.xls', '.pdf']
 
       if (attachments && attachments.length > 0) {
         const textParts: string[] = []
         const imageParts: ContentPart[] = []
+
+        // Copy document attachments to workspace for tool access
+        const workspace = new SandboxFS(convId)
+        for (const att of attachments) {
+          const filename = att.url.split('/').pop() || ''
+          const srcPath = path.join('uploads', filename)
+          const ext = path.extname(att.name).toLowerCase()
+
+          if (DOC_EXTS.includes(ext) && fs.existsSync(srcPath)) {
+            try {
+              await workspace.copyIn(srcPath, att.name)
+            } catch (err) {
+              console.warn(`Failed to copy ${att.name} to workspace:`, (err as Error).message)
+            }
+          }
+        }
 
         for (const att of attachments) {
           // Map URL to disk path: extract filename from URL
@@ -159,17 +177,34 @@ chatRoute.post('/', async (c) => {
       }
 
       // --- Run AI loop ---
-      const { reply, suggestions, thinking } = await runChatLoop(userMessage, history, send, undefined, thinking_mode !== false)
+      const { reply, suggestions, thinking, artifacts } = await runChatLoop(
+        userMessage, history, send, undefined,
+        thinking_mode !== false, convId, userId,
+      )
 
       // --- Save assistant message ---
       if (reply) {
         const replyNow = Math.floor(Date.now() / 1000)
+
+        // Convert artifacts to Attachment format for persistence
+        let msgAttachments: string | null = null
+        if (artifacts && artifacts.length > 0) {
+          const attList: Attachment[] = artifacts.map((a) => ({
+            url: a.downloadUrl,
+            name: a.displayName,
+            size: 0,
+            type: a.mimeType,
+          }))
+          msgAttachments = JSON.stringify(attList)
+        }
+
         await db.insert(messages).values({
           conversation_id: convId,
           role: 'assistant',
           content: reply,
           thinking: thinking || null,
           suggestions: suggestions.length > 0 ? JSON.stringify(suggestions) : null,
+          attachments: msgAttachments,
           created_at: replyNow,
         }).run()
       }

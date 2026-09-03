@@ -3,6 +3,8 @@ import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
 import { eq, and, desc, gte } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
+import path from 'path'
+import fs from 'fs'
 import { userAuthMiddleware } from '../middleware/userAuth.js'
 
 function getUserId(c: any): string {
@@ -67,6 +69,13 @@ conversationsRoute.delete('/:id', async (c) => {
 
   const id = c.req.param('id')
   await db.delete(conversations).where(and(eq(conversations.id, id), eq(conversations.user_id, userId))).run()
+
+  // Clean up conversation workspace
+  const wsPath = path.resolve('data', 'workspaces', id)
+  if (fs.existsSync(wsPath)) {
+    fs.rmSync(wsPath, { recursive: true, force: true })
+  }
+
   return c.json({ success: true })
 })
 
