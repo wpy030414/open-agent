@@ -4,7 +4,6 @@ import { adminAuthMiddleware, signAdminToken, verifyAdminKey } from '../auth.js'
 import { getConfig, updateConfig } from '../config.js'
 import { db } from '../db.js'
 import { conversations, messages } from '../schema.js'
-import { pluginRegistry } from '../plugins/registry.js'
 import { skillRegistry } from '../skills/loader.js'
 import fs from 'fs'
 import path from 'path'
@@ -26,7 +25,6 @@ adminRoute.post('/auth', async (c) => {
 
 // Protected routes below
 adminRoute.use('/config', adminAuthMiddleware)
-adminRoute.use('/plugins/*', adminAuthMiddleware)
 adminRoute.use('/skills/*', adminAuthMiddleware)
 // '/stats' alone does NOT match sub-paths (e.g. /stats/conversations) in Hono —
 // mount both the exact and wildcard forms so every stats endpoint is protected.
@@ -120,110 +118,6 @@ adminRoute.get('/stats/conversations/:id/messages', async (c) => {
       attachments: m.attachments ? JSON.parse(m.attachments) : null,
     })),
   })
-})
-
-// List plugins
-adminRoute.get('/plugins', (c) => {
-  return c.json({ plugins: pluginRegistry.getAll() })
-})
-
-// Upload plugin from zip
-adminRoute.post('/plugins/upload', async (c) => {
-  const tmpDir = path.resolve('plugins', `__upload_tmp_${Date.now()}`)
-  try {
-    const body = await c.req.parseBody()
-    const file = body['file']
-
-    if (!file || typeof file === 'string') {
-      return c.json({ error: 'No file provided' }, 400)
-    }
-
-    if (file.size > MAX_UPLOAD_SIZE) {
-      return c.json({ error: 'File too large (max 50MB)' }, 400)
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer())
-    const zip = new AdmZip(buffer)
-
-    // Zip slip protection
-    for (const entry of zip.getEntries()) {
-      if (entry.entryName.includes('..')) {
-        return c.json({ error: 'Invalid zip: path traversal detected' }, 400)
-      }
-    }
-
-    // Detect wrapper directory
-    const { wrapperDir } = resolveZipRoot(zip)
-
-    // Extract to temp directory
-    fs.mkdirSync(tmpDir, { recursive: true })
-    zip.extractAllTo(tmpDir, true)
-
-    // Determine actual content directory
-    const actualDir = wrapperDir ? path.join(tmpDir, wrapperDir) : tmpDir
-
-    // Clean up macOS artifacts
-    cleanMacOSArtifacts(actualDir)
-
-    // Validate plugin.json exists
-    const manifestPath = path.join(actualDir, 'plugin.json')
-    if (!fs.existsSync(manifestPath)) {
-      return c.json({ error: 'No valid plugin.json found in archive' }, 400)
-    }
-
-    // Validate manifest
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
-    if (!manifest.name || !manifest.tools) {
-      return c.json({ error: 'Invalid plugin.json: name and tools are required' }, 400)
-    }
-
-    // Move to final destination
-    const destDir = path.resolve('plugins', manifest.name)
-    if (fs.existsSync(destDir)) {
-      fs.rmSync(destDir, { recursive: true })
-    }
-    fs.renameSync(actualDir, destDir)
-
-    // Clean up temp directory
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true })
-    }
-
-    pluginRegistry.refresh()
-    return c.json({ success: true, plugins: pluginRegistry.getAll() })
-  } catch (err: any) {
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true })
-    }
-    console.error('Plugin upload failed:', err)
-    return c.json({ error: err.message || 'Upload failed' }, 500)
-  }
-})
-
-// Install plugin (from directory name or path)
-adminRoute.post('/plugins/install', async (c) => {
-  const body = await c.req.json<{ name: string }>()
-  const pluginDir = path.resolve('plugins', body.name)
-
-  if (!fs.existsSync(path.join(pluginDir, 'plugin.json'))) {
-    return c.json({ error: `Plugin "${body.name}" not found or missing plugin.json` }, 404)
-  }
-
-  pluginRegistry.refresh()
-  return c.json({ success: true, plugins: pluginRegistry.getAll() })
-})
-
-// Uninstall plugin
-adminRoute.delete('/plugins/:name', (c) => {
-  const name = c.req.param('name')
-  const pluginDir = path.resolve('plugins', name)
-
-  if (fs.existsSync(pluginDir)) {
-    fs.rmSync(pluginDir, { recursive: true })
-  }
-
-  pluginRegistry.refresh()
-  return c.json({ success: true, plugins: pluginRegistry.getAll() })
 })
 
 // List skills

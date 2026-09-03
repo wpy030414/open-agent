@@ -12,7 +12,7 @@ import './db.js'
 import { env } from './config.js'
 import { conversationsRoute } from './routes/conversations.js'
 import { adminRoute } from './routes/admin.js'
-import { pluginsRoute } from './routes/plugins.js'
+import { appRoute } from './routes/app.js'
 import { chatRoute } from './routes/chat.js'
 import { uploadRoute } from './routes/upload.js'
 import { userRoute } from './routes/user.js'
@@ -31,7 +31,7 @@ app.use('*', cors({
 // API Routes
 app.route('/api/conversations', conversationsRoute)
 app.route('/api/admin', adminRoute)
-app.route('/api/plugins', pluginsRoute)
+app.route('/api/app-name', appRoute)
 app.route('/api/chat', chatRoute)
 app.route('/api/upload', uploadRoute)
 app.route('/api/user', userRoute)

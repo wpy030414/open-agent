@@ -1,8 +1,7 @@
-import type { AppConfig, ServerMessage, ToolCall } from '../../shared/types.js'
+import type { AppConfig, ServerMessage } from '../../shared/types.js'
 import type { ChatMessage, ContentPart } from './provider.js'
 import { streamChatCompletion } from './provider.js'
-import { getAllTools, resolveTool } from './tools.js'
-import { executeTool } from '../plugins/executor.js'
+import { getAllTools } from './tools.js'
 import { getConfig } from '../config.js'
 import { skillRegistry } from '../skills/registry.js'
 import { MAX_TOOL_ROUNDS, MAX_HISTORY_MESSAGES, SUGGESTIONS_FENCE } from '../../shared/constants.js'
@@ -102,50 +101,10 @@ export async function runChatLoop(
       return { reply: '', suggestions: [], thinking: fullThinking }
     }
 
-    // Tool calls → execute and loop
+    // Tool calls → no longer supported (plugin system removed)
     if (finishReason === 'tool_calls' && pendingCalls.length > 0) {
-      // Append assistant message with tool calls
-      toolMessages.push({
-        role: 'assistant',
-        content: null,
-        tool_calls: pendingCalls.map((c) => ({
-          id: c.id,
-          type: 'function',
-          function: { name: c.name, arguments: c.arguments },
-        })),
-      })
-
-      for (const call of pendingCalls) {
-        let input: Record<string, unknown>
-        try {
-          input = JSON.parse(call.arguments)
-        } catch {
-          input = {}
-        }
-
-        send({ type: 'tool_call', name: call.name, input })
-
-        let result: unknown
-        try {
-          result = await executeTool(call.name, input)
-          const summary = summarizeResult(result)
-          send({ type: 'tool_result', name: call.name, summary })
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : 'Tool execution failed'
-          result = { error: errMsg }
-          send({ type: 'tool_result', name: call.name, summary: `Error: ${errMsg}` })
-        }
-
-        toolMessages.push({
-          role: 'tool',
-          content: JSON.stringify(result),
-          tool_call_id: call.id,
-        })
-      }
-
-      // Reset text for next round
-      fullText = ''
-      continue
+      send({ type: 'error', message: 'Tool calling is no longer supported' })
+      return { reply: '', suggestions: [], thinking: fullThinking }
     }
 
     // Final answer — parse suggestions

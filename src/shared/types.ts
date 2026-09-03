@@ -49,16 +49,10 @@ export interface AppConfig {
   model: string
   system_prompt: string
   support_attachments: boolean
+  show_github: boolean
 }
 
-// ---- Plugin ----
-
-export interface PluginManifest {
-  name: string
-  version: string
-  description: string
-  tools: ToolDefinition[]
-}
+// ---- Tool Definition ----
 
 export interface ToolDefinition {
   name: string
@@ -68,11 +62,6 @@ export interface ToolDefinition {
     properties: Record<string, { type: string; description?: string }>
     required?: string[]
   }
-}
-
-export interface InstalledPlugin {
-  manifest: PluginManifest
-  path: string
 }
 
 // ---- Skill ----
@@ -125,10 +114,6 @@ export interface AdminConversationRow {
 }
 
 // ---- API Responses ----
-
-export interface PluginListResponse {
-  plugins: InstalledPlugin[]
-}
 
 export interface SkillListResponse {
   skills: InstalledSkill[]
