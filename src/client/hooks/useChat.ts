@@ -8,7 +8,7 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   thinking?: string
-  toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string }>
+  toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
   suggestions?: string[]
   attachments?: Attachment[]
   streaming?: boolean
@@ -328,7 +328,11 @@ export function useChat() {
           const last = prev[prev.length - 1]
           if (!last || !last.toolCalls?.length) return prev
           const calls = [...last.toolCalls]
-          calls[calls.length - 1] = { ...calls[calls.length - 1], result: msg.summary }
+          calls[calls.length - 1] = {
+            ...calls[calls.length - 1],
+            result: msg.summary,
+            artifacts: msg.artifacts || calls[calls.length - 1].artifacts,
+          }
           return [...prev.slice(0, -1), { ...last, toolCalls: calls }]
         })
         break

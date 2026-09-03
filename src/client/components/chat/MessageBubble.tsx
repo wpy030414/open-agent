@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageContent } from './MessageContent'
 import { ThinkingBlock } from './ThinkingBlock'
-import { AttachmentList } from './AttachmentCard'
+import { AttachmentCard, AttachmentList } from './AttachmentCard'
 import { User, Bot, Undo2, Check, X } from 'lucide-react'
 import type { Attachment } from '@/shared/types'
 
@@ -11,7 +11,7 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   thinking?: string
-  toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string }>
+  toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
   suggestions?: string[]
   attachments?: Attachment[]
   streaming?: boolean
@@ -51,9 +51,23 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
           {message.toolCalls && message.toolCalls.length > 0 && (
             <div className="mb-2 space-y-1">
               {message.toolCalls.map((tc, idx) => (
-                <div key={idx} className="text-xs bg-muted rounded-md px-3 py-1.5">
-                  <span className="font-medium">🔧 {tc.name}</span>
-                  {tc.result && <span className="text-muted-foreground ml-2">→ {tc.result}</span>}
+                <div key={idx}>
+                  <div className="text-xs bg-muted rounded-md px-3 py-1.5">
+                    <span className="font-medium">🔧 {tc.name}</span>
+                    {tc.result && <span className="text-muted-foreground ml-2">→ {tc.result}</span>}
+                  </div>
+                  {tc.artifacts && tc.artifacts.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {tc.artifacts.map((art, i) => (
+                        <AttachmentCard key={i} attachment={{
+                          url: art.downloadUrl,
+                          name: art.displayName,
+                          size: 0,
+                          type: art.mimeType,
+                        }} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

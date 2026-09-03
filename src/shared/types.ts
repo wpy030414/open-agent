@@ -85,7 +85,7 @@ export type ServerMessage =
   | { type: 'token'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool_call'; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; name: string; summary: string }
+  | { type: 'tool_result'; name: string; summary: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }
   | { type: 'done'; reply: string; suggestions: string[] }
   | { type: 'error'; message: string }
 
