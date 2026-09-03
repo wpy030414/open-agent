@@ -27,8 +27,6 @@
     "downloadFailed": "Attachment download failed: {{message}}",
     "send": "Send",
     "renderFailed": "Render failed",
-    "pluginResult": "Plugin Result",
-    "pluginCallFailed": "Plugin call failed",
     "unknownError": "Unknown error",
     "errorMessage": "Error: {{message}}",
     "connectionTimeout": "Connection lost, please retry",
@@ -71,9 +69,9 @@
     "uploadFavicon": "Upload Favicon",
     "uploadBackground": "Upload Background",
     "appBackground": "Chat Background",
+    "showGithub": "Show GitHub Link",
     "tabModel": "Model",
     "tabPrompt": "Prompt",
-    "tabPlugins": "Plugins",
     "tabSkills": "Skills",
     "tabStats": "Stats",
     "statsTotalUsers": "Total Users",
@@ -91,16 +89,9 @@
     "model": "Model",
     "supportAttachments": "Support Attachments",
     "systemPrompt": "System Prompt",
-    "noPlugins": "No plugins installed",
     "noSkills": "No skills installed",
-    "uploadPlugin": "Upload Plugin (.zip)",
     "uploadSkill": "Upload Skill (.zip)",
     "authFailed": "Auth failed"
-  },
-  "plugins": {
-    "title": "Plugins",
-    "available": "Available Plugins",
-    "call": "Call"
   },
   "server": {
     "bannerTitle": "Open Agent Server",

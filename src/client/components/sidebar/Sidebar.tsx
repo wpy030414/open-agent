@@ -18,6 +18,7 @@ interface SidebarProps {
   onMenuClick: () => void
   appName: string
   currentUser: string
+  showGithub?: boolean
 }
 
 interface MenuState {
@@ -25,7 +26,7 @@ interface MenuState {
   anchorRect: DOMRect
 }
 
-export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, onDelete, onExport, onMenuClick, appName, currentUser }: SidebarProps) {
+export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, onDelete, onExport, onMenuClick, appName, currentUser, showGithub = true }: SidebarProps) {
   const { t } = useTranslation()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -87,14 +88,16 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onRename, on
       {/* App name + GitHub */}
       <div className="flex items-center justify-between px-4 border-b" style={{ height: '60px' }}>
         <h1 className="text-lg font-semibold">{appName}</h1>
-        <a
-          href="https://github.com/wpy030414/open-agent"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-        >
-          <Github className="h-4 w-4" />
-        </a>
+        {showGithub && (
+          <a
+            href="https://github.com/wpy030414/open-agent"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+          >
+            <Github className="h-4 w-4" />
+          </a>
+        )}
       </div>
 
       {/* New chat button */}

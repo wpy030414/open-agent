@@ -57,11 +57,10 @@ export function SettingsDialog({ open, onOpenChange, admin }: SettingsDialogProp
           </div>
         ) : (
           <Tabs defaultValue="branding" className="mt-4">
-            <TabsList className="w-full grid-cols-6">
+            <TabsList className="w-full grid-cols-5">
               <TabsTrigger value="branding">{t('settings.tabBranding')}</TabsTrigger>
               <TabsTrigger value="model">{t('settings.tabModel')}</TabsTrigger>
               <TabsTrigger value="prompt">{t('settings.tabPrompt')}</TabsTrigger>
-              <TabsTrigger value="plugins">{t('settings.tabPlugins')}</TabsTrigger>
               <TabsTrigger value="skills">{t('settings.tabSkills')}</TabsTrigger>
               <TabsTrigger value="stats">{t('settings.tabStats')}</TabsTrigger>
             </TabsList>
@@ -73,9 +72,6 @@ export function SettingsDialog({ open, onOpenChange, admin }: SettingsDialogProp
             </TabsContent>
             <TabsContent value="prompt">
               <PromptSettings token={admin.token!} />
-            </TabsContent>
-            <TabsContent value="plugins">
-              <PluginManager token={admin.token!} />
             </TabsContent>
             <TabsContent value="skills">
               <SkillManager token={admin.token!} />
@@ -109,6 +105,7 @@ function BrandingSettings({ token }: { token: string }) {
         app_name: config.app_name,
         app_favicon: config.app_favicon,
         app_background: config.app_background,
+        show_github: config.show_github,
       })
     } catch (err) {
       console.error(err)
@@ -226,6 +223,13 @@ function BrandingSettings({ token }: { token: string }) {
           )}
         </div>
       </div>
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium">{t('settings.showGithub')}</label>
+        <Switch
+          checked={config.show_github !== false}
+          onCheckedChange={(v) => setConfig({ ...config, show_github: v })}
+        />
+      </div>
       <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
     </div>
   )
@@ -326,77 +330,6 @@ function PromptSettings({ token }: { token: string }) {
         />
       </div>
       <Button onClick={handleSave} disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
-    </div>
-  )
-}
-
-// --- Plugin Manager ---
-function PluginManager({ token }: { token: string }) {
-  const { t } = useTranslation()
-  const [plugins, setPlugins] = useState<any[]>([])
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    api.listAdminPlugins(token).then((r) => setPlugins(r.plugins)).catch(console.error)
-  }, [token])
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setUploading(true)
-    setUploadError(null)
-    try {
-      const result = await api.uploadPlugin(token, file)
-      setPlugins(result.plugins)
-    } catch (err: any) {
-      setUploadError(err.message)
-    }
-    setUploading(false)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  return (
-    <div className="space-y-4 pt-4">
-      <div className="flex items-center gap-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".zip"
-          className="hidden"
-          onChange={handleUpload}
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={uploading}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Upload className="mr-2 h-4 w-4" />
-          {uploading ? t('common.loading') : t('settings.uploadPlugin')}
-        </Button>
-      </div>
-      {uploadError && <p className="text-sm text-destructive">{uploadError}</p>}
-      {plugins.length === 0 ? (
-        <p className="text-muted-foreground">{t('settings.noPlugins')}</p>
-      ) : (
-        plugins.map((p) => (
-          <div key={p.manifest?.name || p.name} className="flex items-center justify-between p-3 border rounded-md">
-            <div>
-              <p className="font-medium">{p.manifest?.name || p.name}</p>
-              <p className="text-sm text-muted-foreground">{p.manifest?.description || p.description}</p>
-            </div>
-            <Button variant="destructive" size="sm" onClick={async () => {
-              await api.uninstallPlugin(token, p.manifest?.name || p.name)
-              const r = await api.listAdminPlugins(token)
-              setPlugins(r.plugins)
-            }}>
-              {t('common.remove')}
-            </Button>
-          </div>
-        ))
-      )}
     </div>
   )
 }

@@ -80,17 +80,13 @@ export const api = {
   renameConversation: (id: string, title: string) => request<{ conversation: import('@/shared/types').Conversation }>(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   revertMessages: (conversationId: string, messageId: number) => request<{ success: boolean }>(`/api/conversations/${conversationId}/messages/${messageId}`, { method: 'DELETE' }),
 
-  // Plugins
-  listPlugins: () => request<{ plugins: Array<{ name: string; version: string; description: string; tools: Array<{ name: string; description: string }> }> }>('/api/plugins'),
-  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean }>('/api/plugins/app-name'),
+  // App config
+  getAppName: () => request<{ app_name: string; app_favicon: string; app_background: string; support_attachments: boolean; show_github: boolean }>('/api/app-name'),
 
   // Admin
   adminAuth: (key: string) => request<{ token: string; expires_at: number }>('/api/admin/auth', { method: 'POST', body: JSON.stringify({ key }) }),
   getConfig: (token: string) => request<import('@/shared/types').AppConfig>('/api/admin/config', { headers: { Authorization: `Bearer ${token}` } }),
   updateConfig: (token: string, config: Partial<import('@/shared/types').AppConfig>) => request<import('@/shared/types').AppConfig>('/api/admin/config', { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(config) }),
-  listAdminPlugins: (token: string) => request<{ plugins: import('@/shared/types').InstalledPlugin[] }>('/api/admin/plugins', { headers: { Authorization: `Bearer ${token}` } }),
-  installPlugin: (token: string, name: string) => request('/api/admin/plugins/install', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ name }) }),
-  uninstallPlugin: (token: string, name: string) => request(`/api/admin/plugins/${name}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }),
   listAdminSkills: (token: string) => request<{ skills: import('@/shared/types').InstalledSkill[] }>('/api/admin/skills', { headers: { Authorization: `Bearer ${token}` } }),
   installSkill: (token: string, name: string) => request('/api/admin/skills/install', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ name }) }),
   uninstallSkill: (token: string, name: string) => request(`/api/admin/skills/${name}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }),
@@ -99,26 +95,6 @@ export const api = {
   getAdminConversationMessages: (token: string, id: string) => request<{ conversation: any; messages: import('@/shared/types').Message[] }>(`/api/admin/stats/conversations/${id}/messages`, { headers: { Authorization: `Bearer ${token}` } }),
 
   // Upload (multipart/form-data — do NOT set Content-Type, let browser set boundary)
-  uploadPlugin: (token: string, file: File) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    return fetch('/api/admin/plugins/upload', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    }).then(async (res) => {
-      if (!res.ok) {
-        if (res.status === 401) {
-          localStorage.removeItem('user')
-          localStorage.removeItem('token')
-          window.dispatchEvent(new CustomEvent('auth:expired'))
-        }
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(err.error || `HTTP ${res.status}`)
-      }
-      return res.json() as Promise<{ success: boolean; plugins: import('@/shared/types').InstalledPlugin[] }>
-    })
-  },
   uploadSkill: (token: string, file: File) => {
     const formData = new FormData()
     formData.append('file', file)

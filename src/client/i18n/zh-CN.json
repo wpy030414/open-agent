@@ -27,8 +27,6 @@
     "downloadFailed": "附件下载失败：{{message}}",
     "send": "发送",
     "renderFailed": "渲染失败",
-    "pluginResult": "插件结果",
-    "pluginCallFailed": "插件调用失败",
     "unknownError": "未知错误",
     "errorMessage": "错误：{{message}}",
     "connectionTimeout": "连接超时，请重试",
@@ -70,9 +68,9 @@
     "uploadFavicon": "上传图标",
     "uploadBackground": "上传背景图",
     "appBackground": "聊天背景图片",
+    "showGithub": "显示 GitHub 项目页",
     "tabModel": "模型",
     "tabPrompt": "提示词",
-    "tabPlugins": "插件",
     "tabSkills": "技能",
     "tabStats": "统计",
     "statsTotalUsers": "用户总数",
@@ -90,16 +88,9 @@
     "model": "模型",
     "supportAttachments": "支持附件",
     "systemPrompt": "系统提示词",
-    "noPlugins": "暂无已安装的插件",
     "noSkills": "暂无已安装的技能",
-    "uploadPlugin": "上传插件 (.zip)",
     "uploadSkill": "上传技能 (.zip)",
     "authFailed": "验证失败"
-  },
-  "plugins": {
-    "title": "插件",
-    "available": "可用插件",
-    "call": "调用"
   },
   "server": {
     "bannerTitle": "智能体服务",

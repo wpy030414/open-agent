@@ -24,6 +24,7 @@ export function App() {
   const [appName, setAppName] = useState('Open Agent')
   const [backgroundImage, setBackgroundImage] = useState('')
   const [supportAttachments, setSupportAttachments] = useState(false)
+  const [showGithub, setShowGithub] = useState(true)
   const [currentUser, setCurrentUser] = useState<string | null>(() => getUser())
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -67,6 +68,7 @@ export function App() {
         setBackgroundImage(r.app_background)
       }
       setSupportAttachments(!!r.support_attachments)
+      setShowGithub(r.show_github !== false)
     }).catch(() => {})
   }, [])
 
@@ -81,6 +83,7 @@ export function App() {
         }
         setBackgroundImage(r.app_background || '')
         setSupportAttachments(!!r.support_attachments)
+        setShowGithub(r.show_github !== false)
       }).catch(() => {})
     }
   }, [settingsOpen])
@@ -139,6 +142,7 @@ export function App() {
           onMenuClick={() => setMenuOpen(true)}
           appName={appName}
           currentUser={currentUser}
+          showGithub={showGithub}
         />
       </div>
 
@@ -169,7 +173,6 @@ export function App() {
           onSend={chat.sendMessage}
           onCancel={chat.cancel}
           onRevert={chat.revertMessage}
-          onPluginCall={chat.callPlugin}
           backgroundImage={backgroundImage}
           supportAttachments={supportAttachments}
         />

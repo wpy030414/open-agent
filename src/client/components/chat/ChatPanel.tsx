@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageList } from './MessageList'
 import { InputBar } from './InputBar'
-import { PluginBar } from './PluginBar'
 import { MessageSquarePlus } from 'lucide-react'
 import type { Attachment } from '@/shared/types'
 
@@ -23,12 +22,11 @@ interface ChatPanelProps {
   onSend: (text: string, thinkingMode?: boolean, attachments?: Array<{ url: string; name: string; size: number; type: string }>) => void | Promise<void>
   onCancel: () => void
   onRevert: (index: number) => Promise<string | null>
-  onPluginCall?: (pluginName: string, toolName: string, input: Record<string, unknown>) => void
   backgroundImage?: string
   supportAttachments?: boolean
 }
 
-export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, onPluginCall, backgroundImage, supportAttachments }: ChatPanelProps) {
+export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, backgroundImage, supportAttachments }: ChatPanelProps) {
   const { t } = useTranslation()
   const bottomRef = useRef<HTMLDivElement>(null)
   const [revertedText, setRevertedText] = useState<string>('')
@@ -98,9 +96,6 @@ export function ChatPanel({ messages, loading, onSend, onCancel, onRevert, onPlu
           </div>
         ) : (
           <>
-            <div className="max-w-3xl mx-auto w-full px-4 pb-2 flex gap-2">
-              <PluginBar onPluginCall={onPluginCall || (() => {})} />
-            </div>
             <InputBar
               onSend={handleSend}
               disabled={loading}

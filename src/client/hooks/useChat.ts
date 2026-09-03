@@ -363,53 +363,6 @@ export function useChat() {
     setLoading(false)
   }, [])
 
-  const callPlugin = useCallback(async (plugin: string, tool: string, input: Record<string, unknown>) => {
-    try {
-      const res = await fetch('/api/plugins/call', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plugin, tool, input }),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok || !data.success) {
-        const errorMsg = data.error || t('chat.pluginCallFailed')
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now(),
-            role: 'assistant' as const,
-            content: `❌ ${t('chat.errorMessage', { message: errorMsg })}`,
-            created_at: new Date().toISOString(),
-          },
-        ])
-        return
-      }
-
-      // Display the result as an assistant message
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          role: 'assistant' as const,
-          content: `**${t('chat.pluginResult')} (${plugin}.${tool})**\n\n\`\`\`json\n${JSON.stringify(data.result, null, 2)}\n\`\`\``,
-          created_at: new Date().toISOString(),
-        },
-      ])
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          role: 'assistant' as const,
-          content: `❌ ${t('chat.errorMessage', { message: err instanceof Error ? err.message : t('chat.unknownError') })}`,
-          created_at: new Date().toISOString(),
-        },
-      ])
-    }
-  }, [])
-
   const selectConversation = useCallback(async (id: string) => {
     try {
       const res = await api.getConversation(id)
@@ -528,7 +481,6 @@ export function useChat() {
     exportConversation,
     refreshConversations,
     cancel,
-    callPlugin,
     revertMessage,
   }
 }
