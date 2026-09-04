@@ -10,8 +10,8 @@
 |---|---|
 | `src/server/auth.ts` | JWT 签名/验证 + 密钥校验 + 认证中间件 |
 | `src/server/config.ts` | 环境变量读取 + DB 配置读写 |
-| `src/server/routes/admin.ts` | 管理员 REST API（含统计、插件/技能上传） |
-| `src/client/components/settings/SettingsDialog.tsx` | 管理面板（6 标签页） |
+| `src/server/routes/admin.ts` | 管理员 REST API（含统计、技能上传/卸载） |
+| `src/client/components/settings/SettingsDialog.tsx` | 管理面板（5 标签页：Branding/Model/Prompt/Skills/Stats） |
 
 ## 认证流程
 
@@ -54,7 +54,8 @@
   "api_key": "sk-....abcd",
   "model": "gpt-4o",
   "system_prompt": "You are a helpful assistant.",
-  "support_attachments": false
+  "support_attachments": false,
+  "show_github": true
 }
 ```
 
@@ -123,6 +124,7 @@
 | `model` | `OPENAI_MODEL` | `gpt-4o` | 模型名称 |
 | `system_prompt` | — | `""`（空） | 系统提示词 |
 | `support_attachments` | — | `false` | 全局附件开关 |
+| `show_github` | — | `true` | 是否显示 GitHub 链接 |
 
 ## JWT 实现细节
 
@@ -132,38 +134,35 @@
 - **有效期**：24 小时（`ADMIN_TOKEN_EXPIRY_HOURS`）
 - **回退密钥**：`ADMIN_KEY` 为空时使用 `"fallback-secret"`（不推荐）
 
-## 插件 / 技能上传
+## 技能上传
 
-管理员通过本路由上传/安装/卸载插件与技能，zip 处理逻辑（zip slip 防护、包装目录检测、macOS 产物清理、50MB 上限）详见 `module-plugin.md` 与 `module-skill.md`。对应端点：
+管理员通过本路由上传/安装/卸载技能，zip 处理逻辑（zip slip 防护、包装目录检测、macOS 产物清理、50MB 上限）详见 `module-skill.md`。对应端点：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/admin/plugins` | 列出插件 |
-| POST | `/api/admin/plugins/upload` | 上传插件 zip |
-| POST | `/api/admin/plugins/install` | 安装/刷新已有目录 |
-| DELETE | `/api/admin/plugins/:name` | 卸载插件 |
 | GET | `/api/admin/skills` | 列出技能 |
 | POST | `/api/admin/skills/upload` | 上传技能 zip |
 | POST | `/api/admin/skills/install` | 安装/刷新已有目录 |
 | DELETE | `/api/admin/skills/:name` | 卸载技能 |
 
+> 插件系统已移除（commit 3530176），相关端点不再存在。
+
 ## 前端面板（SettingsDialog）
 
-6 个标签页：
+5 个标签页：
 
 1. **Branding** — 应用名称、Favicon（上传转 base64）、聊天背景图
 2. **Model** — API 地址、密钥、模型名称（密钥输入框为 `type=password` 遮挡显示 + 明文切换按钮）
 3. **Prompt** — 系统提示词编辑
-4. **Plugins** — 插件列表 / 上传 / 卸载
-5. **Skills** — 技能列表 / 上传 / 卸载
-6. **Stats** — 用户/对话/消息统计 + 对话表格（可展开查看消息）
+4. **Skills** — 技能列表 / 上传 / 卸载
+5. **Stats** — 用户/对话/消息统计 + 对话表格（可展开查看消息）
 
 管理面板使用管理员 JWT（通过 `useAdmin` hook 管理），调用 API 时显式传入 `Authorization`，不被用户 token 覆盖（见 `lib/api.ts` 的「caller 提供 Authorization 则不覆盖」逻辑）。
 
 ## 安全约束
 
 1. `ADMIN_KEY` 永远不通过 API 返回给前端 ✅ 已实现
-2. 受保护路由：`/api/admin/config`、`/api/admin/plugins/*`、`/api/admin/skills/*`、`/api/admin/stats` ✅ 已实现
+2. 受保护路由：`/api/admin/config`、`/api/admin/skills/*`、`/api/admin/stats` ✅ 已实现
 3. 空密钥不被视为有效（`verifyAdminKey` 检查 `key !== ''`）✅ 已实现
 4. 统计面板可跨用户读取所有对话内容 —— 属管理员特权，受管理员 JWT 保护（`use('/stats', ...)` + `use('/stats/*', ...)` 双挂载覆盖精确路径与所有子路径；曾因只挂 `/stats` 导致 `/stats/conversations` 及 messages 子端点匿名可访问，已修复并实测验证）
 

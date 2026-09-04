@@ -2,7 +2,7 @@
 
 ## 概述
 
-工具系统为 Open Agent 提供基础操作能力（文件读写、网络请求、文档处理、技能加载），使 AI 能够执行具体任务而不仅仅是生成文本。工具作为 Agent 的**基础能力**内建，与插件系统（扩展能力）完全解耦。
+工具系统为 Open Agent 提供基础操作能力（文件读写、网络请求、文档处理、技能加载、bash 命令执行），使 AI 能够执行具体任务而不仅仅是生成文本。工具作为 Agent 的**基础能力**内建，与插件系统（已移除）完全解耦。
 
 所有工具操作在**沙盒化的对话工作区**中执行，确保无法访问宿主文件系统或项目文件。
 
@@ -21,7 +21,7 @@
 
 **实现**：
 - 工具代码位于 `src/server/tools/`，作为项目源码的一部分
-- 插件代码位于 `plugins/`（可选目录），通过动态加载
+- 插件系统已移除（commit 3530176）
 - `tools.ts` 调用 `getToolDefinitions()` 从内置 registry 聚合工具
 
 ### D-T02：为什么用目录沙盒而不是 Docker
@@ -42,6 +42,7 @@
 - 拒绝符号链接（通过 `lstat` 检查）
 - 拒绝 Windows 保留文件名（CON、PRN、NUL、COM1-9、LPT1-9）
 - 工作区容量限制：100MB / 500 文件（可通过环境变量调整）
+- 单文件大小限制：20MB（可通过 `WORKSPACE_MAX_FILE_BYTES` 调整）
 
 **不保证**：
 - 不提供进程级隔离（工具代码与主进程共享内存空间）
@@ -72,46 +73,68 @@
 
 **实现**：
 - 系统提示词中列出 `## Available Skills` + 每个 Skill 的名称和描述
-- AI 认为需要时调用 `load_skill(name)` 获取完整内容
+- AI 认为需要时调用 `load_skill(name)` 获取完整内容，或 `load_skill(name, path)` 加载技能内特定文件
+- 提供 `list_skill_files(name)` 工具发现技能目录内的文件结构
+- 技能通过递归扫描 `skills/` 目录树自动发现（任何含 SKILL.md 的目录都注册为技能）
 - `load_skill` 返回内容上限 50K 字符，超出截断
 
-### D-T05：为什么需要工具循环防护
+### D-T05：为什么需要工具循环防护（已演进）
 
 **问题**：AI 可能陷入工具调用死循环（如反复 `write_file` 同一个文件）。
 
 **观察**：用户让 AI 写冷笑话，AI 思考过度进入 deadloop，不断生成文件（冷笑话.md、冷笑话2.md、冷笑话3.md...）。
 
-**决策**：在 `loop.ts` 中增加硬限制，而非仅依赖系统提示词约束。
+**决策演进**：
+- **初版（D-T05）**：`write_file` 第 2 次调用硬拒绝、第 3 次强制退出
+- **当前（D18）**：改为软提醒——第 2 次调用返回温和提示（"已经是第 N 次调用，写完请回复用户"），但正常执行，不强制拒绝
+
+**原因**：硬拒绝阻塞了合理的多文件写入场景（如生成报告含多个图表）；软提醒既防止无限循环，又允许合法多文件写入。
+
+**新增防护机制**：
+- **漂移检测**：检测连续重复的工具批次签名（`name + arguments` 联合字符串），发现后强制终止
+- **批量终止**：`ToolResult.terminate` 信号——本批所有工具都要求终止时提前收口
+- **输出截断终止**：`finishReason === 'length'` 时跳过工具执行，回填错误消息
+- **统一收口**：每一条路径都有终态（`done` 事件），绝不静默退出
+
+### D-T06：为什么需要 bash 工具
+
+**问题**：宜搭等技能需要执行 CLI 命令（如 openyida），纯文件操作工具不足以支持。
+
+**决策**：新增 `bash` 工具，在沙盒工作区 cwd 下执行 shell 命令。
+
+**安全设计**：
+- cwd 锁定在沙盒内，防止访问宿主文件系统
+- 破坏性命令黑名单（rm -rf /、format c:、shutdown 等）
+- 超时终止（默认 30s，最大 120s）
+- 输出截断（30K 字符）
+- Windows 用 cmd.exe，其余用 /bin/sh，自动切 UTF-8 代码页
+
+### D-T07：Pi 式并行批执行
+
+**问题**：传统 AI Agent 每轮工具调用串行执行，模型需要 N 轮才能完成 N 个工具，延迟高。
+
+**决策**：同一轮内所有工具通过 `Promise.all` 并发执行，但结果按模型发起顺序回填，上下文不乱序。
 
 **依据**：
-- 系统提示词约束不够强，AI 仍可能违反
-- 工具调用有实际成本（磁盘写入、网络请求），必须硬性阻断
-- 用户期望 AI 完成任务后停止，而非无限循环
-
-**实现**：
-- `writeFileCount` 计数器追踪 `write_file` 调用次数
-- 首次调用：正常执行
-- 第二次调用：拒绝并返回 `Refused: write_file already called. STOP writing files.`
-- 第三次及以后：设置 `writeFileRefused = true`，直接强制退出工具循环（`forceBreak = true`）
-
-**其他工具**：
-- `list_files`、`read_file`、`delete_file`、`http_request`、`read_document`、`load_skill` 等读取类工具不限制次数
-- 未来如有需要，可为其他工具增加类似防护
+- 并发执行：无依赖的工具并行跑，减少总轮次
+- 顺序回填：`tool_call_id` 保证上下文不乱序，即使并行执行也按顺序回填
+- 批量终止：`ToolResult.terminate` 信号——本批所有工具都要求终止时提前收口
 
 ## 涉及文件
 
 | 文件 | 职责 |
 |---|---|
-| `src/server/tools/types.ts` | 定义 `ToolModule`、`ToolContext`、`ToolResult` 接口 |
+| `src/server/tools/types.ts` | 定义 `ToolModule`、`ToolContext`、`ToolResult`、`ToolArtifact` 接口 |
 | `src/server/tools/workspace.ts` | `SandboxFS` 类：沙盒化文件系统操作 |
 | `src/server/tools/registry.ts` | 工具注册表，聚合所有内置工具 |
 | `src/server/tools/file-tools.ts` | 文件工具：`read_file`、`write_file`、`list_files`、`delete_file` |
 | `src/server/tools/http-tool.ts` | 网络工具：`http_request`（含 SSRF 防护） |
 | `src/server/tools/document-tools.ts` | 文档工具：`read_document`、`write_document` |
-| `src/server/tools/skill-tools.ts` | 技能工具：`load_skill` |
+| `src/server/tools/skill-tools.ts` | 技能工具：`load_skill`、`list_skill_files` |
+| `src/server/tools/bash-tool.ts` | Bash 命令执行：`bash`（受限沙盒执行） |
 | `src/server/tools/index.ts` | 统一导出 |
 | `src/server/ai/tools.ts` | 调用 `getToolDefinitions()` 聚合工具定义 |
-| `src/server/ai/loop.ts` | 工具调用循环：执行工具、收集结果、防护死循环 |
+| `src/server/ai/loop.ts` | 工具调用循环：并行执行、收集结果、防护死循环、漂移检测 |
 | `src/server/routes/workspace.ts` | 工作区文件下载路由（需认证） |
 
 ## 数据模型
@@ -132,6 +155,7 @@ export interface ToolContext {
   conversationId: string
   userId: string
   workspace: SandboxFS
+  signal?: AbortSignal  // 可选的取消信号
 }
 ```
 
@@ -143,6 +167,7 @@ export interface ToolResult {
   error?: boolean  // 是否执行失败
   data?: unknown   // 可选的结构化数据（用于后续工具调用）
   artifacts?: ToolArtifact[]  // 可选的产物文件（用于 UI 下载）
+  terminate?: boolean  // 终止信号：本批所有工具都置 true 时提前收口
 }
 
 export interface ToolArtifact {
@@ -160,15 +185,17 @@ export interface ToolArtifact {
 ```typescript
 export class SandboxFS {
   constructor(conversationId: string)
-  
-  resolve(safePath: string): string  // 解析路径，拒绝穿越
-  readFile(relPath: string): Promise<string>
-  writeFile(relPath: string, content: string | Buffer): Promise<void>
-  deleteFile(relPath: string): Promise<void>
-  listFiles(relPath: string, recursive?: boolean): Promise<string[]>
-  stat(relPath: string): Promise<fs.Stats>
+  ensureDir(): void                           // 确保工作区目录存在（惰性创建）
+  getRoot(): string                            // 获取绝对根路径
+  resolve(safePath: string): string            // 解析路径，拒绝穿越
+  readFile(relPath: string, encoding: 'utf-8' | 'base64'): Promise<string>
   readFileRaw(relPath: string): Promise<Buffer>
+  writeFile(relPath: string, content: string | Buffer, encoding?: string): Promise<void>
+  deletePath(relPath: string): Promise<void>
+  listDir(relPath: string, recursive?: boolean): Promise<Array<{ name, type, size }>>
+  stat(relPath: string): Promise<fs.Stats>
   copyIn(srcAbsPath: string, destRelPath: string): Promise<void>
+  exists(relPath: string): Promise<boolean>
 }
 ```
 
@@ -201,7 +228,8 @@ export class SandboxFS {
 
 **参数**：
 - `path` (string, required): 相对于工作区根目录的文件路径
-- `content` (string | Buffer, required): 文件内容（文本或二进制）
+- `content` (string, required): 文件内容（文本或二进制）
+- `encoding` (string, optional): `'utf-8'` 或 `'base64'`，默认 `'utf-8'`
 
 **行为**：
 - 检查路径是否在沙盒内
@@ -209,10 +237,9 @@ export class SandboxFS {
 - 写入文件
 - 返回 `ToolArtifact`（供 UI 下载）
 
-**循环防护**：
+**循环防护**（软提醒）：
 - 首次调用：正常执行
-- 第二次调用：拒绝，返回 `Refused: write_file already called. STOP writing files.`
-- 第三次及以后：强制退出工具循环（`forceBreak = true`）
+- 第二次及以后：返回温和提示（"已经是第 N 次调用，写完请回复用户"），但正常执行
 
 #### `list_files`
 
@@ -248,14 +275,16 @@ export class SandboxFS {
 **参数**：
 - `url` (string, required): 目标 URL
 - `method` (string, optional): HTTP 方法，默认 `GET`
-- `headers` (object, optional): 请求头
+- `headers` (string, optional): JSON 字符串形式的请求头
 - `body` (string, optional): 请求体（仅 POST/PUT/PATCH）
+- `timeout` (number, optional): 超时秒数，默认 30，最大 120
 
 **行为**：
 - 验证 URL 格式
 - SSRF 防护：解析域名到 IP，拒绝私有地址段（10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、127.0.0.0/8、169.254.0.0/16）
+- 处理重定向（最多 3 次），每次重定向都重新验证 SSRF
 - 发起请求，读取响应
-- 文本响应：返回 UTF-8 字符串（截断至 50K 字符）
+- 文本响应：返回 UTF-8 字符串（截断至 5MB）
 - 二进制响应：返回 Base64 编码字符串
 
 **错误**：
@@ -297,10 +326,10 @@ export class SandboxFS {
 
 **参数**：
 - `path` (string, required): 输出文件路径（扩展名决定格式）
-- `content` (object, required): 文档内容结构
+- `content` (string, required): JSON 字符串，文档内容结构
 
 **支持格式**：
-- `.docx` → 使用 `docx` 库生成，内容为 `{ title, sections: [{ heading, paragraphs, table }] }`
+- `.docx` → 使用 `docx` 库生成，内容为 `{ title, sections: [{ heading, paragraphs, body, table: { headers, rows } }] }`
 - `.pptx` → 使用 `pptxgenjs` 生成，内容为 `{ title, slides: [{ title, bullets, body, notes }] }`
 - `.xlsx` → 使用 `exceljs` 生成，内容为 `{ sheets: [{ name, headers, rows }] }`
 
@@ -322,22 +351,69 @@ export class SandboxFS {
 
 **参数**：
 - `name` (string, required): 技能名称
+- `path` (string, optional): 技能目录内的相对路径（如 `references/guide.md`），默认 `SKILL.md`
 
 **行为**：
 - 从 `skillRegistry` 获取技能
-- 读取 `SKILL.md` 完整内容（去除 YAML frontmatter）
+- 读取指定文件内容（去除 YAML frontmatter）
 - 返回文本内容（截断至 50K 字符）
+- 同时返回技能目录的文件列表，便于 AI 发现更多参考文件
+
+**错误**：
+- 技能不存在 → `Skill not found`，并列出可用技能
+- 文件不存在 → 列出技能内可用文件
+
+#### `list_skill_files`
+
+列出技能目录内所有可读文件。
+
+**参数**：
+- `name` (string, required): 技能名称
+
+**行为**：
+- 从 `skillRegistry` 获取技能
+- 递归扫描技能目录，收集所有文本文件（.md、.txt、.json、.yaml、.yml、.csv、.xml、.html、.css、.js、.ts）
+- 返回相对路径列表
 
 **错误**：
 - 技能不存在 → `Skill not found`
+
+### 5. Bash 工具（`bash-tool.ts`）
+
+#### `bash`
+
+在沙盒工作区内执行 shell 命令。
+
+**参数**：
+- `command` (string, required): 要执行的 shell 命令
+- `cwd` (string, optional): 工作区内的相对子目录，默认工作区根目录
+- `timeout` (number, optional): 超时秒数，默认 30，最大 120
+
+**行为**：
+- cwd 锁定在沙盒内，拒绝访问外部路径
+- Windows 用 cmd.exe，其余用 /bin/sh
+- Windows 自动切 UTF-8 代码页（`chcp 65001`）
+- 输出截断至 30K 字符
+- 超时强行终止（SIGTERM → 1s 后 SIGKILL）
+
+**破坏性命令拦截**（黑名单子串匹配，大小写不敏感）：
+- 清盘/格式化：`rm -rf /`、`del /s /q`、`rd /s /q`、`format c:`、`mkfs`、`dd if=/dev/zero`、`diskpart`
+- 系统级破坏：`shutdown`、`reboot`、`hibernate`、`sc delete`、`reg delete`
+
+**错误**：
+- 空命令 → `Error: empty command`
+- 黑名单命中 → `Blocked: 命令包含不允许的破坏性片段`
+- cwd 不存在 → `Error: cwd "..." 不存在或不是目录`
+- 超时 → `⏱ 已超时终止`
+- 非零退出码 → 包含 `exit code N` 前缀
 
 ## 工作区生命周期
 
 ### 创建
 
-- **时机**：首次调用任何工具时
+- **时机**：首次调用任何工具时（`bash` 工具在 `execute()` 中调用 `ctx.workspace.ensureDir()`）
 - **位置**：`data/workspaces/{conversationId}/`
-- **方式**：`SandboxFS` 构造函数中 `fs.mkdirSync(root, { recursive: true })`
+- **方式**：`SandboxFS` 构造函数中解析路径，`ensureDir()` 中 `fs.mkdirSync(root, { recursive: true })`
 
 ### 清理
 
@@ -347,9 +423,9 @@ export class SandboxFS {
 
 ### 容量限制
 
-- **默认**：100MB / 500 文件
-- **配置**：环境变量 `WORKSPACE_MAX_BYTES`、`WORKSPACE_MAX_FILES`
-- **超限行为**：`writeFile` 抛出 `Workspace quota exceeded` 错误，工具返回失败
+- **默认**：100MB / 500 文件 / 单文件 20MB
+- **配置**：环境变量 `WORKSPACE_MAX_BYTES`、`WORKSPACE_MAX_FILES`、`WORKSPACE_MAX_FILE_BYTES`
+- **超限行为**：`writeFile` 抛出对应错误，工具返回失败
 
 ## 沙盒安全边界
 
@@ -393,8 +469,50 @@ HTTP 工具在发起请求前：
    - `192.168.0.0/16`（C 类私有）
    - `127.0.0.0/8`（环回）
    - `169.254.0.0/16`（链路本地，云元数据服务）
-   - IPv6: `::1`（环回）、`fc00::/7`（唯一本地）、`fe80::/10`（链路本地）
+   - `0.0.0.0/8`（当前网络）
+   - `224.0.0.0/4`（多播）
+   - `240.0.0.0/4`（保留）
+   - IPv6: `::1`（环回）、`fc00::/7`（唯一本地）、`fe80::/10`（链路本地）、`ff00::/8`（多播）
 3. 命中则拒绝请求，返回 `SSRF blocked: private IP address`
+
+### Bash 工具安全
+
+- cwd 锁定在沙盒内，通过 `workspace.resolve()` + `stat().isDirectory()` 验证
+- 破坏性命令黑名单（子串匹配，大小写不敏感）
+- 超时强杀（SIGTERM → 1s 后 SIGKILL）
+- 输出截断（30K 字符）
+
+## AI 循环防护机制
+
+### 轮数限制（硬上限）
+
+- `MAX_TOOL_ROUNDS = 5`：最多 5 轮工具调用循环
+- 到达上限后使用最近一次流式正文兜底，确保有终态回复
+
+### 漂移检测
+
+- 记录每轮工具调用的批次签名：`calls.map(c => `${c.name}:${c.arguments}`).join('|')`
+- 连续两轮完全相同 → 强制终止，注入 `BLOCKED: 你已连续调用完全相同的工具两次`
+
+### 输出截断终止
+
+- `finishReason === 'length'` 时，工具参数可能被截断
+- 跳过工具执行，回填错误消息，让模型用文本收尾
+
+### 批量终止
+
+- `ToolResult` 新增 `terminate?: boolean` 字段
+- 当本批所有工具都返回 `terminate: true` 时，提前收口，不再发起下一轮
+
+### write_file 软提醒
+
+- `writeFileCount` 计数器追踪写入次数
+- 第 2 次及以后：返回温和提示，但正常执行
+
+### 统一收口
+
+- 每一条路径都有 `done` 事件发送，绝不静默退出
+- 使用 `lastFullText` 兜底，轮数撞顶时用最近一次流式正文作为回复
 
 ## API 端点
 
@@ -427,13 +545,26 @@ HTTP 工具在发起请求前：
 
 #### `tool_call`
 
-工具调用开始。
+工具调用开始（AI 发起调用时立即发送）。
 
 ```typescript
 {
   type: 'tool_call',
   name: string,  // 工具名称
   input: object  // 工具参数
+}
+```
+
+#### `tool_execution_start`
+
+工具实际执行开始（在 `tool_call` 之后、执行之前发送，用于区分"AI 调用了"和"实际执行了"）。
+
+```typescript
+{
+  type: 'tool_execution_start',
+  id?: string,      // 工具调用 ID
+  name: string,     // 工具名称
+  input: object     // 工具参数
 }
 ```
 
@@ -444,8 +575,9 @@ HTTP 工具在发起请求前：
 ```typescript
 {
   type: 'tool_result',
-  name: string,      // 工具名称
-  summary: string,   // 一句话描述结果
+  id?: string,          // 工具调用 ID
+  name: string,         // 工具名称
+  summary: string,      // 一句话描述结果
   artifacts?: ToolArtifact[]  // 可选的产物文件
 }
 ```
@@ -477,32 +609,40 @@ HTTP 工具在发起请求前：
 7. ✅ `read_document` 可以解析 `.docx`、`.pptx`、`.xlsx`、`.pdf`、`.csv`
 8. ✅ `write_document` 可以生成 `.docx`、`.pptx`、`.xlsx`
 9. ✅ `load_skill` 可以按需加载技能的完整内容
+10. ✅ `list_skill_files` 可以列出技能目录内的文件
+11. ✅ `bash` 可以在沙盒内执行 shell 命令
 
 ### 安全验收
 
-10. ✅ 路径穿越攻击被拒绝（`../etc/passwd` → `Path traversal blocked`）
-11. ✅ 符号链接被拒绝（指向沙盒外 → `Symlinks not allowed`）
-12. ✅ 保留文件名被拒绝（`CON.txt` → `Reserved filename blocked`）
-13. ✅ SSRF 攻击被拦截（`http://192.168.1.1` → `SSRF blocked`）
-14. ✅ 工作区容量超限时报错（`Workspace quota exceeded`）
+12. ✅ 路径穿越攻击被拒绝（`../etc/passwd` → `Path traversal blocked`）
+13. ✅ 符号链接被拒绝（指向沙盒外 → `Symlinks not allowed`）
+14. ✅ 保留文件名被拒绝（`CON.txt` → `Reserved filename blocked`）
+15. ✅ SSRF 攻击被拦截（`http://192.168.1.1` → `SSRF blocked`）
+16. ✅ 工作区容量超限时报错（`Workspace quota exceeded`）
+17. ✅ bash 破坏性命令被拦截（`rm -rf /` → `Blocked`）
+18. ✅ bash 超时后强制终止
 
 ### 循环防护验收
 
-15. ✅ `write_file` 第一次调用正常执行
-16. ✅ `write_file` 第二次调用被拒绝（`Refused: write_file already called`）
-17. ✅ `write_file` 第三次调用强制退出工具循环（`forceBreak = true`）
+19. ✅ `write_file` 第一次调用正常执行
+20. ✅ `write_file` 第二次及以后返回温和提示但正常执行（软提醒）
+21. ✅ 漂移检测：连续相同工具批次被终止
+22. ✅ 最大轮数限制：5 轮后自动收口
+23. ✅ 输出截断：`finishReason === 'length'` 时跳过工具执行
+24. ✅ 批量终止：所有工具返回 `terminate: true` 时提前收口
+25. ✅ 统一收口：每条路径都有 `done` 事件
 
 ### 生命周期验收
 
-18. ✅ 删除对话时工作区被清理
-19. ✅ 工作区不存在时删除对话不报错
-20. ✅ 新对话首次调用工具时工作区被创建
+26. ✅ 删除对话时工作区被清理
+27. ✅ 工作区不存在时删除对话不报错
+28. ✅ 新对话首次调用工具时工作区被创建
 
 ### 前端集成验收
 
-21. ✅ 工具调用在消息气泡中显示为 `🔧 {name} → {summary}`
-22. ✅ 产物文件显示为下载卡片，点击可下载
-23. ✅ 下载请求携带 JWT，未认证返回 401
+29. ✅ 工具调用在消息气泡中显示为 `🔧 {name} → {summary}`
+30. ✅ 产物文件显示为下载卡片，点击可下载
+31. ✅ 下载请求携带 JWT，未认证返回 401
 
 ## 外部依赖
 
@@ -511,19 +651,20 @@ HTTP 工具在发起请求前：
 - **文档读取**：`mammoth`（DOCX）、`word-extractor`（DOC）、`adm-zip`（PPTX）、`xlsx`（XLSX/XLS）、`pdf-parse`（PDF）
 - **文档生成**：`docx`（DOCX）、`pptxgenjs`（PPTX）、`exceljs`（XLSX）
 - **沙盒**：无外部依赖，纯 Node.js `fs` + 路径验证
+- **Bash 工具**：无外部依赖，纯 Node.js `child_process.spawn`
 
 ## 未来扩展
 
 ### 代码执行工具
 
-**现状**：未实现。
+**现状**：bash 工具已提供基础 shell 执行能力。
 
 **挑战**：
 - 需要进程级隔离（Docker 容器或 WASM）
 - 需要资源限制（CPU 时间、内存、网络）
-- 需要支持多语言（Python、JavaScript、Shell）
+- 需要支持多语言（Python、JavaScript、Shell）——bash 工具已覆盖 Shell
 
-**建议**：作为插件实现，而非内置工具。
+**建议**：如需更严格的多语言隔离，作为插件实现。
 
 ### 数据库查询工具
 

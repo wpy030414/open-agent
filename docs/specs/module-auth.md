@@ -55,7 +55,7 @@
 
 | 导出位置 | 是否被路由使用 | 行为 |
 |---|---|---|
-| `src/server/middleware/userAuth.ts` | ✅ 是（chat / conversations / upload） | 严格模式：只接受 `Authorization: Bearer <jwt>` |
+| `src/server/middleware/userAuth.ts` | ✅ 是（chat / conversations / upload / workspace） | 严格模式：只接受 `Authorization: Bearer <jwt>` |
 | `src/server/auth.ts` 中的同名函数 | ❌ **否（当前无路由导入，属遗留代码）** | 允许 `X-User` 头回退 |
 
 **严格版本（实际生效）**：
@@ -134,8 +134,8 @@
 2. `verifyAdminKey()` 显式拒绝空字符串（`key === env.ADMIN_KEY && key !== ''`）
 3. PIN 校验一律 `^\d{4}$`，前后端一致
 4. 用户 token 与管理员 token 互不通用（`role` 不匹配即失败）
-5. 受保护资源：`/api/chat/*`、`/api/conversations/*`、`/api/upload/*` 需用户 JWT；`/api/admin/config`、`/api/admin/plugins/*`、`/api/admin/skills/*`、`/api/admin/stats` 需管理员 JWT
+5. 受保护资源：`/api/chat/*`、`/api/conversations/*`、`/api/upload/*`、`/api/workspace/*` 需用户 JWT；`/api/admin/config`、`/api/admin/skills/*`、`/api/admin/stats` 需管理员 JWT
 6. 管理员端点的保护通过 `adminRoute.use('<path>', adminAuthMiddleware)` 按路径挂载，**不是**全局挂载——`POST /api/admin/auth` 本身必须保持公开
-   - ⚠️ **Hono 的 `use('/stats', mw)` 只精确匹配 `/stats`，不覆盖 `/stats/conversations` 等子路径**；保护一组端点须同时挂载精确路径与 `/*` 通配（本项目 `plugins/*`、`skills/*`、`stats` + `stats/*` 均已如此）。这是曾经踩过的坑：`/stats/conversations` 一度完全未鉴权，匿名即可拖取全站对话
+   - ⚠️ **Hono 的 `use('/stats', mw)` 只精确匹配 `/stats`，不覆盖 `/stats/conversations` 等子路径**；保护一组端点须同时挂载精确路径与 `/*` 通配（本项目 `skills/*`、`stats` + `stats/*` 均已如此）。这是曾经踩过的坑：`/stats/conversations` 一度完全未鉴权，匿名即可拖取全站对话
 7. **认证 ≠ 授权**：JWT 只证明「是谁」，不证明「有权访问这条数据」。所有涉及具体资源的端点必须在 handler 内二次校验 `user_id` 归属（见 `chat.ts`、`conversations.ts` 的 `and(eq(id), eq(user_id, userId))` 查询），越权一律返回 404 而非 403（不泄露资源是否存在）
-8. `routes/plugins.ts` 为完全公开端点（应用品牌信息、插件列表、手动调用工具），不得放入需要保密的数据
+8. **401 自动驱逐**：前端 `lib/api.ts` 收到 401 时触发 `window.dispatchEvent(new CustomEvent('auth:expired'))`，`App.tsx` 监听该事件→清空 token→回到登录页。确保非法/过期 JWT 被驱逐而非静默重试

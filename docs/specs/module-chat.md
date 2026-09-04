@@ -2,14 +2,14 @@
 
 ## 概述
 
-聊天模块是 Open Agent 的核心，负责用户与 AI 之间的实时对话。包含服务端 SSE 流式端点、多轮工具调用循环、思考模式与附件多模态，以及客户端 React Hook。
+聊天模块是 Open Agent 的核心，负责用户与 AI 之间的实时对话。包含服务端 SSE 流式端点、多轮工具调用循环（Pi 式并行批执行）、思考模式与附件多模态，以及客户端 React Hook。
 
 ## 涉及文件
 
 | 文件 | 职责 |
 |---|---|
 | `src/server/routes/chat.ts` | SSE 流式端点 `POST /api/chat`、附件拼装、对话创建 |
-| `src/server/ai/loop.ts` | 聊天循环：系统提示词构建 + 工具调用 + suggestions 解析 |
+| `src/server/ai/loop.ts` | 聊天循环：系统提示词构建 + 工具调用（Pi 式并行）+ 漂移检测 + suggestions 解析 |
 | `src/server/ai/provider.ts` | OpenAI 兼容 API 流式客户端（含多模态与 thinking 参数） |
 | `src/server/ai/tools.ts` | 工具注册表（委托到内置工具 registry） |
 | `src/client/hooks/useChat.ts` | 客户端聊天状态管理 + SSE 解析 + 重试 + 哈希路由 |
@@ -44,8 +44,9 @@
 | `conversation_id` | `{ id: string }` | 对话 ID（新建或复用时都会发送） |
 | `token` | `{ text: string }` | 文本增量 token |
 | `thinking` | `{ text: string }` | 思考过程增量 token |
-| `tool_call` | `{ name: string, input: object }` | 工具调用开始 |
-| `tool_result` | `{ name: string, summary: string, artifacts?: ToolArtifact[] }` | 工具调用结果摘要（含可选产物文件） |
+| `tool_call` | `{ id?: string, name: string, input: object }` | AI 发起工具调用（含参数） |
+| `tool_execution_start` | `{ id?: string, name: string, input: object }` | 工具实际开始执行 |
+| `tool_result` | `{ id?: string, name: string, summary: string, artifacts?: ToolArtifact[] }` | 工具调用结果（含可选产物文件） |
 | `done` | `{ reply: string, suggestions: string[] }` | 对话完成（终止事件） |
 | `error` | `{ message: string }` | 错误（终止事件） |
 
@@ -68,25 +69,43 @@
 3. **重试去重**：`_retry === true` 时**跳过**保存用户消息，避免重复入库
 4. **更新时间**：每次收到用户消息都刷新 `conversations.updated_at`
 5. **历史裁剪**：从 DB 读取该对话全部消息后 `slice(0, -1)` 去掉刚插入的当前消息，作为 history 传入 loop
-6. **助手消息持久化**：仅当 `reply` 非空才写入，保存 `content`、`thinking`、`suggestions`（空数组存 null）
+6. **助手消息持久化**：仅当 `reply` 非空才写入，保存 `content`、`thinking`、`suggestions`（空数组存 null）、`attachments`（工具产物）
+7. **文档附件复制到工作区**：`docx/pptx/xlsx/xls/pdf` 附件会自动复制到对话工作区，供 AI 通过 `read_document` 工具访问
 
 ### 服务端（loop.ts）
 
 1. **历史裁剪**：`history.slice(-MAX_HISTORY_MESSAGES)`，只发送最近 20 条
-2. **工具循环上限**：最多 5 轮（`MAX_TOOL_ROUNDS`）；超出后发送 `done`，reply 固定为 `(Reached maximum tool call rounds)`
+2. **工具循环上限**：最多 5 轮（`MAX_TOOL_ROUNDS`）；超出后使用最近一次流式正文兜底，确保有非空回复
 3. **系统提示词构建**（`buildSystemPrompt`）：
    - 基础内容 = `config.system_prompt`
-   - 若存在技能，追加 `## Available Skills` + 每个技能的名称和描述摘要（完整内容通过 `load_skill` 工具按需加载）
+   - 若存在技能，追加 `## Available Skills` + 每个技能的名称和描述摘要（完整内容通过 `load_skill` 工具按需加载）；技能列表包含提示：如果用户请求与技能描述不匹配，不要强行加载试探
    - 思考模式关闭时追加 `\n\n/no_think\n请直接回答问题，不要输出任何思考过程或推理步骤。`
-   - 追加工具使用规范（防止 write_file 死循环等）
+   - 追加工具使用规范（防止 write_file 死循环、技能止损等）
    - **最后**追加硬编码的 `## 输出格式（最高优先级，不得省略）` suggestions 指令 —— 置于末尾以保证即使 system_prompt 是强人设也不会吞掉格式要求
-4. **Suggestions 围栏扣留**：见 `DECISIONS.md` D10
+4. **Suggestions 围栏扣留**：见 `DECISIONS.md` D10 — 维护 `SUGGESTIONS_FENCE.length` 长度的缓冲区，围栏跨 token chunk 到达时仍然被完整检测
 5. **Suggestions 解析**（`parseSuggestions`）：
    - 用 `lastIndexOf` 定位**真正末尾**的 `` ```suggestions `` 块，避免匹配到模型在正文里复述的格式示例
    - 去除行首空白、`-`、`*`、数字与点等前缀，过滤空行，最多取 3 条
    - 未找到围栏时只做 `trimEnd()`，**保留首部字符**（因为 done 的 reply 会覆盖客户端已流式拼接的内容）
-6. **工具结果摘要**（`summarizeResult`）：null→`Done`；字符串截断 100 字符；数组→`N items`；含 `total`→`Found N items`；含 `error`→`Error: ...`；其余 JSON 截断 100 字符
-7. **取消**：`signal.aborted` 时发送 `error: 'Cancelled'` 并返回
+6. **Pi 式并行批执行**：
+   - 同一轮内所有工具通过 `Promise.all` 并发执行
+   - 结果按模型发起顺序回填，上下文不乱序
+   - `ToolResult.terminate` 信号：本批所有工具都要求终止时提前收口
+7. **漂移检测**：
+   - 记录每轮工具调用批次签名：`calls.map(c => `${c.name}:${c.arguments}`).join('|')`
+   - 连续两轮完全相同 → 强制终止，注入 `BLOCKED: 你已连续调用完全相同的工具两次`
+8. **输出截断终止**：
+   - `finishReason === 'length'` 时跳过工具执行，回填错误消息，让模型用文本收尾
+   - 防止截断的参数被错误执行
+9. **write_file 软提醒**：
+   - `writeFileCount` 计数器追踪写入次数
+   - 第 2 次及以后：返回温和提示（"已经是第 N 次调用，写完请回复用户"），但正常执行
+   - 不强制拒绝，允许合理的多文件写入场景
+10. **统一收口**：
+    - 每一条路径都有 `done` 事件发送，绝不静默退出
+    - 使用 `lastFullText` 兜底，轮数撞顶/工具阶段终止时用最近一次流式正文作为回复
+    - 兜底回复为空时固定提示："（已完成思考但未能给出有效回答：已中止反复的工具调用。请换一种问法重试。）"
+11. **取消**：`signal.aborted` 时发送 `error: '已取消'` 并返回
 
 ### 客户端（useChat.ts）
 
@@ -105,7 +124,7 @@
    - 新建/删除当前对话 → 清除 hash
    - 监听 `hashchange` 支持浏览器前进后退；加载失败（越权/不存在）则清除 hash 回到初始页
 9. **导出**：客户端拼接 `# 标题` + 每条 `### 🧑 User` / `### 🤖 Assistant`，以 `---` 分隔，生成 `.txt` 下载；文件名过滤 `\/:*?"<>|`
-10. **工具调用**：内置工具（`read_file`、`write_file`、`http_request`、`read_document`、`write_document`、`load_skill` 等）由 AI 通过 function calling 自动调用，结果以独立助手气泡展示。详见 `specs/module-tool-system.md`
+10. **工具调用**：内置工具（`read_file`、`write_file`、`list_files`、`delete_file`、`http_request`、`read_document`、`write_document`、`load_skill`、`list_skill_files`、`bash`）由 AI 通过 function calling 自动调用，结果以独立助手气泡展示。详见 `specs/module-tool-system.md`
 
 ## 上游 API 客户端（provider.ts）
 

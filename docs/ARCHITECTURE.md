@@ -21,11 +21,12 @@
 │  │  ┌────────┐ ┌───────────┐ ┌───────┐ ┌────────┐ ┌──────┐ │  │
 │  │  │chat.ts │ │conversat. │ │admin  │ │upload  │ │user  │ │  │
 │  │  │SSE 聊天 │ │ 对话 CRUD │ │管理API │ │文件上传 │ │PIN   │ │  │
+│  │  │+health │ │           │ │       │ │        │ │      │ │  │
 │  │  └────────┘ └───────────┘ └───────┘ └────────┘ └──────┘ │  │
-│  │  ┌────────┐ ┌───────────┐                                │  │
-│  │  │workspace│ │  health  │                                │  │
-│  │  │工作区下载│ │ 健康检查  │                                │  │
-│  │  └────────┘ └───────────┘                                │  │
+│  │  ┌────────┐ ┌───────────┐ ┌────────┐                    │  │
+│  │  │workspace│ │  app.ts  │ │  health │                   │  │
+│  │  │工作区下载│ │ 应用名称  │ │ (chat内)│                   │  │
+│  │  └────────┘ └───────────┘ └────────┘                    │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │                     中间件层                                │  │
@@ -39,7 +40,7 @@
 │  │  ┌─────────────┐  ┌───────────────┐  ┌────────────────┐  │  │
 │  │  │  ai/loop.ts │  │   tools/      │  │  skills/       │  │  │
 │  │  │ 聊天循环     │  │  内置工具系统  │  │  loader.ts     │  │  │
-│  │  │ + 工具调用   │  │  (沙盒执行)   │  │  + registry    │  │  │
+│  │  │ (Pi 式设计)  │  │  (沙盒执行)   │  │  + registry    │  │  │
 │  │  └─────────────┘  └───────────────┘  └────────────────┘  │  │
 │  │  ┌─────────────┐  ┌───────────────┐  ┌────────────────┐  │  │
 │  │  │ai/provider  │  │  config.ts    │  │   auth.ts      │  │  │
@@ -71,22 +72,43 @@
   → 加载历史消息（最近 20 条）
   → 解析附件（图片→base64 多模态、xlsx→csv、pdf→text）
   → 文档附件复制到对话工作区（docx/pptx/xlsx/pdf）
-  → runChatLoop()
+  → runChatLoop()（Pi 式设计：循环决定「下一步做什么」，程序提供能力并执行）
     → buildSystemPrompt()（注入技能摘要 + 工具使用规范 + 格式指令）
     → streamChatCompletion()（调用 OpenAI 兼容 API）
       → 逐 token 流式输出（SSE event: token）
       → 流式输出思考过程（SSE event: thinking）
       → 如果 finishReason == 'tool_calls'：
-          → 执行内置工具（read_file / write_file / http_request / read_document / write_document / load_skill）
-          → write_file 防循环：每轮最多 1 次，超出拒绝并强制退出
+          → 回填 assistant 消息（含 tool_calls）到上下文
+          → 发送 tool_execution_start 事件（SSE event: tool_execution_start）
+          → 并行执行所有工具（Promise.all），结果按模型发起顺序逐个回填
+          → write_file 温和提醒：每回合第 2 次调用仅提示，不做硬拒绝
           → 工具产物（artifacts）通过 SSE 下发下载链接
           → 将结果追加到消息上下文
-          → 继续下一轮循环（最多 5 轮）
-      → 最终回复：
+          → 漂移检测：同一批 (tool + args) 被连续调用两次 → 强制终止工具阶段
+          → 批终止检测：本批所有工具都返回 terminate: true → 提前收口
+          → 继续下一轮循环（最多 5 轮，MAX_TOOL_ROUNDS = 5）
+      → 如果 finishReason == 'length'（输出 token 上限截断）：
+          → 跳过工具执行，回填「未执行」错误结果，让模型用文本收尾
+      → 最终回复（统一收口）：
           → 解析 suggestions 代码块
           → 发送 done 事件（完整回复 + 建议 + artifacts）
+          → 保底兜底：使用最近一次流式正文（lastFullText），绝不空回复
   → 保存助手消息到 DB（含 thinking、suggestions、artifacts 作为 attachments）
   → 客户端收到 done → 更新 UI → 刷新对话列表
+```
+
+### SSE 事件类型
+
+```typescript
+type ServerMessage =
+  | { type: 'conversation_id'; id: string }
+  | { type: 'token'; text: string }
+  | { type: 'thinking'; text: string }
+  | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_execution_start'; id?: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; id?: string; name: string; summary: string; artifacts?: ToolArtifact[] }
+  | { type: 'done'; reply: string; suggestions: string[] }
+  | { type: 'error'; message: string }
 ```
 
 ### 配置数据流
@@ -99,6 +121,13 @@ config.ts → env 对象（不可热更新）
 SQLite settings 表（可热更新）
   ↓ 管理员通过 PUT /api/admin/config 修改
 getConfig() → 运行时配置（优先使用 DB 值）
+  ↓
+AppConfig 字段：
+  app_name, app_favicon, app_background    — 品牌
+  api_endpoint, api_key, model             — LLM 连接
+  system_prompt                            — 系统提示词
+  support_attachments                      — 附件开关
+  show_github                              — 显示 GitHub 链接
 ```
 
 ### 用户认证流
@@ -118,10 +147,17 @@ getConfig() → 运行时配置（优先使用 DB 值）
 
 ```
 routes/chat.ts
+  ├── health (GET /api/chat/health)
   ├── ai/loop.ts
   │     ├── ai/provider.ts（API 客户端）
   │     ├── ai/tools.ts（工具注册表 → 委托到 tools/registry.ts）
   │     ├── tools/registry.ts（内置工具聚合）
+  │     │     ├── tools/file-tools.ts（read_file / write_file）
+  │     │     ├── tools/http-tool.ts（http_request）
+  │     │     ├── tools/document-tools.ts（read_document / write_document）
+  │     │     ├── tools/skill-tools.ts（load_skill / list_skills）
+  │     │     ├── tools/bash-tool.ts（受限 bash 执行）
+  │     │     └── tools/types.ts（ToolContext, ToolResult, ToolModule, ToolArtifact）
   │     ├── tools/workspace.ts（沙盒文件系统）
   │     ├── skills/registry.ts（技能注册表）
   │     └── config.ts（获取配置）
@@ -139,6 +175,9 @@ routes/admin.ts
   ├── auth.ts（JWT 认证）
   ├── config.ts（配置管理）
   └── skills/loader.ts（技能注册表）
+
+routes/app.ts（GET /api/app-name → 应用名称/品牌信息）
+  └── config.ts
 
 routes/workspace.ts
   ├── tools/workspace.ts（沙盒文件系统）
@@ -170,14 +209,14 @@ messages
 ├── role TEXT                    -- user | assistant | system | tool
 ├── content TEXT                 -- 消息内容
 ├── thinking TEXT                -- AI 思考过程（可选）
-├── tool_calls TEXT              -- JSON 序列化的工具调用数组（可选）
+├── tool_calls TEXT              -- JSON 序列化的工具调用数组（tool_call_id 关联工具结果）
 ├── tool_call_id TEXT            -- 工具响应关联的调用 ID（可选）
 ├── suggestions TEXT             -- JSON 序列化的建议数组（可选）
 ├── attachments TEXT             -- JSON 序列化的附件/产物数组（可选）
 └── created_at INTEGER           -- Unix epoch (秒)
 
 settings
-├── key TEXT PRIMARY KEY         -- 配置键（含 pin:{username}）
+├── key TEXT PRIMARY KEY         -- 配置键（含 pin:{username}、app_name、show_github 等）
 └── value TEXT                   -- 配置值
 ```
 
@@ -200,7 +239,7 @@ App
 │     │           └── SuggestionChips -- 后续建议按钮
 │     ├── InputBar               -- 文本输入 + 附件上传 + 思考模式开关 + 发送
 ├── SettingsDialog               -- 管理员面板（需密钥认证）
-│     ├── BrandingTab            -- 应用名称、Favicon、背景图
+│     ├── BrandingTab            -- 应用名称、Favicon、背景图、GitHub 链接
 │     ├── ModelTab               -- API 地址、密钥、模型
 │     ├── PromptTab              -- 系统提示词
 │     ├── SkillsTab              -- 技能管理
