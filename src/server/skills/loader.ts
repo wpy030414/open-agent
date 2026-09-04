@@ -19,12 +19,35 @@ function parseFrontmatter(content: string): { frontmatter: Frontmatter; body: st
   const yamlStr = match[1]
   const body = match[2].trim()
 
-  // Simple YAML parser for flat key: value pairs
+  // YAML 解析：支持扁平 key: value，以及折叠/字面块标量（description: > 多行正文）
   const frontmatter: Record<string, string> = {}
-  for (const line of yamlStr.split('\n')) {
-    const m = line.match(/^(\w+):\s*(.+)$/)
+  let currentKey: string | null = null
+  let multiline: 'fold' | 'literal' | null = null
+
+  for (const raw of yamlStr.split('\n')) {
+    const m = raw.match(/^([\w-]+):\s*(.*)$/)
     if (m) {
-      frontmatter[m[1]] = m[2].replace(/^['"]|['"]$/g, '')
+      // 新 key
+      currentKey = m[1]
+      const trimmed = m[2].trim()
+      if (trimmed.startsWith('>')) {
+        multiline = 'fold' // 折叠：后续缩进行用空格连接
+        frontmatter[currentKey] = ''
+      } else if (trimmed.startsWith('|')) {
+        multiline = 'literal' // 字面块：保留换行
+        frontmatter[currentKey] = ''
+      } else {
+        multiline = null
+        frontmatter[currentKey] = trimmed.replace(/^['"]|['"]$/g, '')
+      }
+      continue
+    }
+    // 折叠/字面块的续行
+    if (currentKey && multiline) {
+      const text = raw.trim()
+      if (!text) continue
+      frontmatter[currentKey] +=
+        (frontmatter[currentKey] ? (multiline === 'fold' ? ' ' : '\n') : '') + text
     }
   }
 
@@ -68,10 +91,32 @@ function scanSkillsDir(): InstalledSkill[] {
   }
 
   const skills: InstalledSkill[] = []
+
+  const walk = (dir: string): void => {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+
+    // 若本目录含 SKILL.md，登记为技能；无论是否登记，都继续下钻子目录，
+    // 以便聚合技能（如 yida-skills 下的 openyida）的嵌套子技能（yida-login 等）也收进来。
+    const hasOwnSkill = entries.some((e) => e.isFile() && e.name === 'SKILL.md')
+    if (hasOwnSkill) {
+      const skill = loadSkill(dir)
+      if (skill) skills.push(skill)
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      walk(path.join(dir, entry.name))
+    }
+  }
+
   for (const entry of fs.readdirSync(SKILLS_DIR, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
-    const skill = loadSkill(path.join(SKILLS_DIR, entry.name))
-    if (skill) skills.push(skill)
+    walk(path.join(SKILLS_DIR, entry.name))
   }
   return skills
 }
