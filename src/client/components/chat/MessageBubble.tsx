@@ -11,7 +11,7 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   thinking?: string
-  toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
+  toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
   suggestions?: string[]
   attachments?: Attachment[]
   streaming?: boolean
@@ -51,10 +51,13 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
           {message.toolCalls && message.toolCalls.length > 0 && (
             <div className="mb-2 space-y-1">
               {message.toolCalls.map((tc, idx) => (
-                <div key={idx}>
-                  <div className="text-xs bg-muted rounded-md px-3 py-1.5">
+                <div key={tc.id || idx}>
+                  <div className="text-xs bg-muted rounded-md px-3 py-1.5 flex items-center gap-2">
                     <span className="font-medium">🔧 {tc.name}</span>
-                    {tc.result && <span className="text-muted-foreground ml-2">→ {tc.result}</span>}
+                    {tc.status === 'running' && (
+                      <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block" />
+                    )}
+                    {tc.result && <span className="text-muted-foreground ml-1 truncate">→ {tc.result}</span>}
                   </div>
                   {tc.artifacts && tc.artifacts.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-1">

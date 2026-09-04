@@ -6,7 +6,7 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   thinking?: string
-  toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string }>
+  toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string }>
   suggestions?: string[]
   attachments?: Attachment[]
   streaming?: boolean

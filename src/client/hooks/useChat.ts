@@ -8,7 +8,7 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   thinking?: string
-  toolCalls?: Array<{ name: string; input: Record<string, unknown>; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
+  toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
   suggestions?: string[]
   attachments?: Attachment[]
   streaming?: boolean
@@ -313,12 +313,13 @@ export function useChat() {
         break
 
       case 'tool_call':
+      case 'tool_execution_start':
         setMessages((prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
           return [...prev.slice(0, -1), {
             ...last,
-            toolCalls: [...(last.toolCalls || []), { name: msg.name, input: msg.input }],
+            toolCalls: [...(last.toolCalls || []), { id: msg.id, name: msg.name, input: msg.input, status: 'running' }],
           }]
         })
         break
@@ -328,10 +329,20 @@ export function useChat() {
           const last = prev[prev.length - 1]
           if (!last || !last.toolCalls?.length) return prev
           const calls = [...last.toolCalls]
-          calls[calls.length - 1] = {
-            ...calls[calls.length - 1],
+          // 优先按 id 精确匹配（并行回填仍能对齐）；退化到「最后一个同名未完成」
+          let idx = -1
+          if (msg.id) idx = calls.findIndex((c) => c.id === msg.id)
+          if (idx === -1) {
+            for (let i = calls.length - 1; i >= 0; i--) {
+              if (calls[i].name === msg.name && calls[i].status !== 'done') { idx = i; break }
+            }
+          }
+          if (idx === -1) idx = calls.length - 1
+          calls[idx] = {
+            ...calls[idx],
+            status: msg.summary?.startsWith('Tool error') || msg.summary?.startsWith('BLOCKED') ? 'error' : 'done',
             result: msg.summary,
-            artifacts: msg.artifacts || calls[calls.length - 1].artifacts,
+            artifacts: msg.artifacts || calls[idx].artifacts,
           }
           return [...prev.slice(0, -1), { ...last, toolCalls: calls }]
         })

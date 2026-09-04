@@ -142,10 +142,20 @@ export async function runChatLoop(
     // ---- Pi: stopReason === 'length'（输出 token 上限被截断）----
     // 参数不可信，不执行；把「未执行」作为错误结果回填，让模型尽快用文本收尾。
     if (hasToolCalls && finishReason === 'length') {
+      // 回填模型自己的 assistant 消息（含 tool_calls），下一轮才能正确续接
+      toolMessages.push({
+        role: 'assistant',
+        content: fullText || null,
+        tool_calls: pendingCalls.map((c) => ({
+          id: c.id,
+          type: 'function' as const,
+          function: { name: c.name, arguments: c.arguments },
+        })),
+      })
       for (const call of pendingCalls) {
         const summary = `工具 "${call.name}" 未执行：响应触发了输出 token 上限，参数可能被截断。请重新发起完整参数，或直接根据已有信息作答。`
-        send({ type: 'tool_call', name: call.name, input: {} })
-        send({ type: 'tool_result', name: call.name, summary })
+        send({ type: 'tool_call', id: call.id, name: call.name, input: {} })
+        send({ type: 'tool_result', id: call.id, name: call.name, summary })
         toolMessages.push({ role: 'tool', content: summary, tool_call_id: call.id })
       }
       if (round === MAX_TOOL_ROUNDS - 1) break // 没有下一轮了，落到统一收口
@@ -159,9 +169,19 @@ export async function runChatLoop(
       // 连续重复同一批工具 → 模型漂移，强制终止（等价于 Pi 的 batch.terminate）
       if (batchSig && batchSig === lastToolBatchSig) {
         const msg = '你已连续调用完全相同的工具两次。立即停止调用工具，直接根据已有信息用中文回答用户。'
+        // 回填模型自己的 assistant 消息（含 text + tool_calls），再回填 BLOCKED 结果
+        toolMessages.push({
+          role: 'assistant',
+          content: fullText || null,
+          tool_calls: pendingCalls.map((c) => ({
+            id: c.id,
+            type: 'function' as const,
+            function: { name: c.name, arguments: c.arguments },
+          })),
+        })
         for (const call of pendingCalls) {
-          send({ type: 'tool_call', name: call.name, input: {} })
-          send({ type: 'tool_result', name: call.name, summary: `BLOCKED: ${msg}` })
+          send({ type: 'tool_call', id: call.id, name: call.name, input: {} })
+          send({ type: 'tool_result', id: call.id, name: call.name, summary: `BLOCKED: ${msg}` })
           toolMessages.push({ role: 'tool', content: `BLOCKED: ${msg}`, tool_call_id: call.id })
         }
         lastToolBatchSig = '' // 复位，收口兜底用的 lastFullText 不受影响
@@ -169,29 +189,51 @@ export async function runChatLoop(
       }
       lastToolBatchSig = batchSig
 
+      // 回填模型自己的 assistant 消息（含 text + tool_calls），下一轮才能正确续接
+      toolMessages.push({
+        role: 'assistant',
+        content: fullText || null,
+        tool_calls: pendingCalls.map((c) => ({
+          id: c.id,
+          type: 'function' as const,
+          function: { name: c.name, arguments: c.arguments },
+        })),
+      })
+
       for (const call of pendingCalls) {
-        let input: Record<string, unknown>
-        try {
-          input = JSON.parse(call.arguments || '{}')
-        } catch {
-          input = {}
-        }
+        send({ type: 'tool_execution_start', id: call.id, name: call.name, input: call.arguments ? (() => { try { return JSON.parse(call.arguments || '{}') } catch { return {} } })() : {} })
+      }
 
-        // Resolve and execute tool
-        const toolModule = resolveTool(call.name)
-        let result: ToolResult
+      // Pi 设计（executeToolCallsParallel）：无依赖的工具并发执行（Promise.all），
+      // 但结果按模型发起的顺序逐个回填，上下文不乱序。
+      const executedCalls = await Promise.all(
+        pendingCalls.map(async (call) => {
+          let input: Record<string, unknown>
+          try {
+            input = JSON.parse(call.arguments || '{}')
+          } catch {
+            input = {}
+          }
 
-        if (!toolModule) {
-          result = { summary: `Unknown tool: ${call.name}`, error: true }
-        } else if (call.name === 'write_file') {
-          writeFileCount++
-          if (writeFileCount > 1) {
-            // 已是本回合第 2 次写文件：温和提醒，不再永久禁用。
-            // 写文件是合法操作，Pi 的理念是「不硬禁工具、靠收敛」——真正的死循环
-            // 由连续同批检测 + 轮数兜底负责终止。
-            result = {
-              summary: `提示：write_file 已经是第 ${writeFileCount} 次调用。写完当前文件后请直接回复用户，不要再调用更多工具。`,
-              error: false,
+          const toolModule = resolveTool(call.name)
+          let result: ToolResult
+
+          if (!toolModule) {
+            result = { summary: `Unknown tool: ${call.name}`, error: true }
+          } else if (call.name === 'write_file') {
+            writeFileCount++
+            if (writeFileCount > 1) {
+              // 已是本回合第 2 次写文件：温和提醒，不再永久禁用。
+              result = {
+                summary: `提示：write_file 已经是第 ${writeFileCount} 次调用。写完当前文件后请直接回复用户，不要再调用更多工具。`,
+                error: false,
+              }
+            } else {
+              try {
+                result = await toolModule.execute(input, toolContext)
+              } catch (err) {
+                result = { summary: `Tool error: ${(err as Error).message}`, error: true }
+              }
             }
           } else {
             try {
@@ -200,24 +242,19 @@ export async function runChatLoop(
               result = { summary: `Tool error: ${(err as Error).message}`, error: true }
             }
           }
-        } else {
-          try {
-            result = await toolModule.execute(input, toolContext)
-          } catch (err) {
-            result = { summary: `Tool error: ${(err as Error).message}`, error: true }
-          }
-        }
 
-        // Notify client (exactly once per tool call)
-        send({ type: 'tool_call', name: call.name, input })
-        send({ type: 'tool_result', name: call.name, summary: result.summary, artifacts: result.artifacts })
+          return { call, result }
+        }),
+      )
 
-        // Collect artifacts for the response
+      // 按发起顺序回填
+      for (const { call, result } of executedCalls) {
+        send({ type: 'tool_result', id: call.id, name: call.name, summary: result.summary, artifacts: result.artifacts })
+
         if (result.artifacts?.length) {
           producedArtifacts.push(...result.artifacts)
         }
 
-        // Build tool result message for the LLM context
         const toolContent = result.data
           ? JSON.stringify(result.data).slice(0, 50_000)
           : result.summary
@@ -227,6 +264,11 @@ export async function runChatLoop(
           content: toolContent,
           tool_call_id: call.id,
         })
+      }
+
+      // Pi 设计（shouldTerminateToolBatch）：仅当本批所有工具都要求终止时才收口。
+      if (round < MAX_TOOL_ROUNDS - 1 && executedCalls.length > 0 && executedCalls.every(({ result }) => result.terminate === true)) {
+        break // 全部工具都「完成了，停」→ 提前收口，不再发起下一轮
       }
 
       if (round === MAX_TOOL_ROUNDS - 1) break // 已是最后一轮，不再尝试新工具 → 收口
@@ -269,7 +311,7 @@ function buildSystemPrompt(config: AppConfig, thinkingMode: boolean): string {
   const skills = skillRegistry.getAll()
   if (skills.length > 0) {
     prompt += '\n\n## Available Skills\n'
-    prompt += '以下是已安装的技能摘要。如需查看某个技能的完整内容，请调用 load_skill 工具。\n'
+    prompt += '以下是已安装的技能摘要。技能库可能不完整：如果用户的请求没有与某个技能描述明显匹配，请直接如实告知用户当前技能库中是否有可用技能，不要强行加载技能试探。如需查看某个技能的完整内容，请调用 load_skill 工具。\n'
     for (const skill of skills) {
       prompt += `\n- **${skill.manifest.name}**: ${skill.manifest.description}\n`
     }
@@ -293,6 +335,7 @@ function buildSystemPrompt(config: AppConfig, thinkingMode: boolean): string {
 - 如果用户要求"写一个文件"，写一次就够了。不要用不同的文件名重复创建。
 - 写完文件后，用自然语言告诉用户文件已创建，不要再次调用工具。
 - 工具结果通常会直接给出答案所需的信息：不要重复调用同一个工具、不要反复加载同一个技能，加载一次就足够。
+- 【技能止损·硬性规则】加载技能后若发现其内容与用户请求无关，必须立即停止调用任何工具，直接用中文如实告知用户「当前技能库中没有与该请求直接匹配的技能」，并根据已有知识给出通用建议。禁止再次 load_skill 同一技能，禁止为试探目的加载其他技能，禁止在缺少依据时继续调用工具。
 
 ## 输出格式（最高优先级，不得省略）
 每一条回复的【最末尾】必须输出一个 \`\`\`suggestions 代码块，里面恰好 3 个后续建议（每行一条，以 - 开头）。

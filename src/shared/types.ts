@@ -84,8 +84,9 @@ export type ServerMessage =
   | { type: 'conversation_id'; id: string }
   | { type: 'token'; text: string }
   | { type: 'thinking'; text: string }
-  | { type: 'tool_call'; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; name: string; summary: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }
+  | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_execution_start'; id?: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; id?: string; name: string; summary: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }
   | { type: 'done'; reply: string; suggestions: string[] }
   | { type: 'error'; message: string }
 
