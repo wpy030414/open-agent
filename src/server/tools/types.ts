@@ -31,6 +31,11 @@ export interface ToolResult {
   data?: unknown
   /** If true, the tool failed; summary contains the error message */
   error?: boolean
+  /**
+   * 终止信号（等价 Pi 的 result.terminate）：当本批所有工具都置为 true，
+   * 批执行会提前收口，不再发起下一轮 LLM 调用。用于「依据已足够/目标已达成」。
+   */
+  terminate?: boolean
 }
 
 /** Shape every tool module must export */

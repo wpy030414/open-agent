@@ -6,6 +6,7 @@ import { fileTools } from './file-tools.js'
 import { httpTool } from './http-tool.js'
 import { documentTools } from './document-tools.js'
 import { skillTools } from './skill-tools.js'
+import { bashTool } from './bash-tool.js'
 import type { ToolModule } from './types.js'
 import type { ToolDefinition } from '../../shared/types.js'
 
@@ -14,6 +15,7 @@ const allTools: ToolModule[] = [
   httpTool,
   ...documentTools,
   ...skillTools,
+  bashTool,
 ]
 
 /** Get all tool definitions for the LLM */
