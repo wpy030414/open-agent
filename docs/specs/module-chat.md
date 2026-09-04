@@ -9,9 +9,10 @@
 | 文件 | 职责 |
 |---|---|
 | `src/server/routes/chat.ts` | SSE 流式端点 `POST /api/chat`、附件拼装、对话创建 |
-| `src/server/ai/loop.ts` | 聊天循环：系统提示词构建 + 工具调用（Pi 式并行）+ 漂移检测 + suggestions 解析 |
+| `src/server/ai/loop.ts` | 聊天循环：系统提示词构建 + 工具调用（Pi 式并行）+ 漂移检测 + 多轮思考分段 + 追加收尾轮 + suggestions 解析 |
 | `src/server/ai/provider.ts` | OpenAI 兼容 API 流式客户端（含多模态与 thinking 参数） |
 | `src/server/ai/tools.ts` | 工具注册表（委托到内置工具 registry） |
+| `src/shared/thinking.ts` | thinking 分段的编解码（服务端 loop 注入、客户端解析共用） |
 | `src/client/hooks/useChat.ts` | 客户端聊天状态管理 + SSE 解析 + 重试 + 哈希路由 |
 
 ## 接口契约
@@ -43,7 +44,7 @@
 |---|---|---|
 | `conversation_id` | `{ id: string }` | 对话 ID（新建或复用时都会发送） |
 | `token` | `{ text: string }` | 文本增量 token |
-| `thinking` | `{ text: string }` | 思考过程增量 token |
+| `thinking` | `{ text: string, round?: number }` | 思考过程增量 token；`round` 为分段轮号（多轮思考按段聚合） |
 | `tool_call` | `{ id?: string, name: string, input: object }` | AI 发起工具调用（含参数） |
 | `tool_execution_start` | `{ id?: string, name: string, input: object }` | 工具实际开始执行 |
 | `tool_result` | `{ id?: string, name: string, summary: string, artifacts?: ToolArtifact[] }` | 工具调用结果（含可选产物文件） |
@@ -97,15 +98,19 @@
 8. **输出截断终止**：
    - `finishReason === 'length'` 时跳过工具执行，回填错误消息，让模型用文本收尾
    - 防止截断的参数被错误执行
+   - 若本轮产出过 thinking，在思考片段尾部追加 `THINKING_TRUNCATED_MARK`（`…（思考被输出长度截断）…`）标记，供前端提示
 9. **write_file 软提醒**：
    - `writeFileCount` 计数器追踪写入次数
    - 第 2 次及以后：返回温和提示（"已经是第 N 次调用，写完请回复用户"），但正常执行
    - 不强制拒绝，允许合理的多文件写入场景
-10. **统一收口**：
+10. **多轮思考链分段**：
+    - 每一轮的第一条 thinking 前注入「思考片段 N」分隔符（`THINKING_SEGMENT_OPEN + (round+1) + THINKING_SEGMENT_CLOSE`），`thinking` SSE 事件带 `round` 字段
+    - DB 存含分隔符的纯文本，编解码见 `shared/thinking.ts`；前端按段分块展示
+11. **统一收口**：
     - 每一条路径都有 `done` 事件发送，绝不静默退出
-    - 使用 `lastFullText` 兜底，轮数撞顶/工具阶段终止时用最近一次流式正文作为回复
-    - 兜底回复为空时固定提示："（已完成思考但未能给出有效回答：已中止反复的工具调用。请换一种问法重试。）"
-11. **取消**：`signal.aborted` 时发送 `error: '已取消'` 并返回
+    - 优先尝试「追加纯文本收尾轮」（`runFinalAnswerRound`）：用完整上下文（含全部工具结果）+ 一条 `user` 指令，发起一次**不带工具、不开思考**的请求，让模型整理出完整回答（含 suggestions）
+    - 追加轮失败/空回复 → 回退用最近一次流式正文兜底；兜底为空时固定提示："（已完成思考但未能给出有效回答：已中止反复的工具调用。请换一种问法重试。）"
+12. **取消**：`signal.aborted` 时发送 `error: '已取消'` 并返回
 
 ### 客户端（useChat.ts）
 
@@ -125,6 +130,7 @@
    - 监听 `hashchange` 支持浏览器前进后退；加载失败（越权/不存在）则清除 hash 回到初始页
 9. **导出**：客户端拼接 `# 标题` + 每条 `### 🧑 User` / `### 🤖 Assistant`，以 `---` 分隔，生成 `.txt` 下载；文件名过滤 `\/:*?"<>|`
 10. **工具调用**：内置工具（`read_file`、`write_file`、`list_files`、`delete_file`、`http_request`、`read_document`、`write_document`、`load_skill`、`list_skill_files`、`bash`）由 AI 通过 function calling 自动调用，结果以独立助手气泡展示。详见 `specs/module-tool-system.md`
+11. **多轮思考分段渲染**：SSE `thinking` 事件带 `round` 字段时，前端按轮聚合为 `thinkingSegments`；加载历史消息时，把含分隔符的纯文本 `thinking` 通过 `decodeThinkingToSegments`（`shared/thinking.ts`）切分成段。`ThinkingBlock` 优先渲染分段（每段一个折叠块，标「思考片段 N」），无分段（单段/历史）则回退整段显示；含 `THINKING_TRUNCATED_MARK` 的段显示「思考被截断」徽标
 
 ## 上游 API 客户端（provider.ts）
 
@@ -136,9 +142,10 @@ POST {api_endpoint}/chat/completions
 ```
 
 - **思考模式**：透传 DashScope 兼容参数 `enable_thinking`；关闭时额外置 `thinking_budget: 0`（用于 Qwen3 等默认常开推理的模型彻底关掉思考阶段）
-- **思考内容**：仅当 `thinkingMode` 为真时才 yield `thinking` 事件（读取 `delta.reasoning_content`）
+- **思考内容**：仅当 `thinkingMode` 为真时才 yield `thinking` 事件（读取 `delta.reasoning_content`）；`loop.ts` 注入「思考片段 N」分隔符并附加 `round` 字段后透传
 - **工具**：`ToolDefinition.input_schema` 映射为 OpenAI function 的 `parameters`
 - **tool_calls 聚合**：按 `index` 累积 `id`/`name`/`arguments`（arguments 跨 chunk 拼接），`finish_reason` 到达时按 index 排序后一次性 yield
+- **收尾轮**：追加纯文本收尾请求时传 `tools: []` 且 `thinkingMode=false`（`enable_thinking=false` + `thinking_budget=0`），模型无法调用工具、直接整理最终回答
 - **超时**：`AbortController` 120 秒，**`clearTimeout` 在收到响应头后立即执行** —— 该超时只覆盖「建立连接/等待响应头」阶段，不限制流本身的持续时间
 - **流完整性**：reader 结束但既无 `[DONE]` 也无 `finish_reason` → 抛 `Upstream API stream closed unexpectedly without [DONE] signal`
 - **容错**：跳过无法解析的 JSON 行；非 2xx 响应读取正文抛 `API error {status}: {text}`

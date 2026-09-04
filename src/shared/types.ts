@@ -80,10 +80,13 @@ export interface InstalledSkill {
 
 // ---- SSE Events ----
 
+// ThinkingSegment 定义在 shared/thinking.ts（与服务端 loop 共用编解码），此处 re-export
+export type { ThinkingSegment } from './thinking.js'
+
 export type ServerMessage =
   | { type: 'conversation_id'; id: string }
   | { type: 'token'; text: string }
-  | { type: 'thinking'; text: string }
+  | { type: 'thinking'; text: string; round?: number }
   | { type: 'tool_call'; id?: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_execution_start'; id?: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; id?: string; name: string; summary: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }

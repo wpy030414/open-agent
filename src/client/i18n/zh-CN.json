@@ -20,6 +20,8 @@
     "thinking": "思考中...",
     "thought": "已思考",
     "thinkingMode": "思考模式",
+    "thinkingSegment": "思考片段 {{n}}",
+    "thinkingTruncated": "思考被截断",
     "deepThinking": "深度思考",
     "addAttachment": "添加附件",
     "uploading": "上传中...",

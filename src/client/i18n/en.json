@@ -20,6 +20,8 @@
     "thinking": "Thinking...",
     "thought": "Thought",
     "thinkingMode": "Thinking",
+    "thinkingSegment": "Thought {{n}}",
+    "thinkingTruncated": "Thought truncated",
     "deepThinking": "Deep Think",
     "addAttachment": "Attach",
     "uploading": "Uploading...",

@@ -4,13 +4,14 @@ import { MessageContent } from './MessageContent'
 import { ThinkingBlock } from './ThinkingBlock'
 import { AttachmentCard, AttachmentList } from './AttachmentCard'
 import { User, Bot, Undo2, Check, X } from 'lucide-react'
-import type { Attachment } from '@/shared/types'
+import type { Attachment, ThinkingSegment } from '@/shared/types'
 
 interface ChatMessage {
   id?: number
   role: 'user' | 'assistant'
   content: string
   thinking?: string
+  thinkingSegments?: ThinkingSegment[]
   toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
   suggestions?: string[]
   attachments?: Attachment[]
@@ -44,8 +45,15 @@ export function MessageBubble({ message, onSuggestion, showSuggestions, onRevert
       <div className={`flex-1 min-w-0 ${isUser ? 'flex flex-row-reverse gap-2' : ''}`}>
         {/* Content column */}
         <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
-          {/* Thinking block */}
-          {message.thinking && <ThinkingBlock content={message.thinking} done={!message.streaming} />}
+          {/* Thinking block — 优先按分段展示（多轮思考），否则回退到整段 */}
+
+          {message.thinking && (
+            <ThinkingBlock
+              content={message.thinking}
+              segments={message.thinkingSegments}
+              done={!message.streaming}
+            />
+          )}
 
           {/* Tool calls */}
           {message.toolCalls && message.toolCalls.length > 0 && (

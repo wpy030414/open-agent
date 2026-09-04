@@ -1,11 +1,12 @@
 import { MessageBubble } from './MessageBubble'
-import type { Attachment } from '@/shared/types'
+import type { Attachment, ThinkingSegment } from '@/shared/types'
 
 interface ChatMessage {
   id?: number
   role: 'user' | 'assistant'
   content: string
   thinking?: string
+  thinkingSegments?: ThinkingSegment[]
   toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string }>
   suggestions?: string[]
   attachments?: Attachment[]

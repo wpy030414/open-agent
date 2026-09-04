@@ -7,7 +7,7 @@ import { skillRegistry } from '../skills/registry.js'
 import { resolveTool } from '../tools/registry.js'
 import { SandboxFS } from '../tools/workspace.js'
 import type { ToolContext, ToolResult, ToolArtifact } from '../tools/types.js'
-import { MAX_TOOL_ROUNDS, MAX_HISTORY_MESSAGES, SUGGESTIONS_FENCE } from '../../shared/constants.js'
+import { MAX_TOOL_ROUNDS, MAX_HISTORY_MESSAGES, SUGGESTIONS_FENCE, THINKING_SEGMENT_OPEN, THINKING_SEGMENT_CLOSE, THINKING_TRUNCATED_MARK } from '../../shared/constants.js'
 
 type SendFn = (msg: ServerMessage) => void
 
@@ -47,6 +47,8 @@ export async function runChatLoop(
 
   let toolMessages: ChatMessage[] = []
   let fullThinking = ''
+  let emittedSegmentRound = -1 // 已注入分隔符的最新轮次；-1 = 尚未注入任何分隔符
+  let lastRoundHadThinking = false // 上一轮是否产出了 thinking（用于截断标记）
 
   // Pi 的设计理念：外层循环决定「下一步做什么」，程序提供能力并执行，
   // 循环把两者接起来。MAX_TOOL_ROUNDS 是最终安全网 —— 但每一条出口都必须发终态，
@@ -70,6 +72,7 @@ export async function runChatLoop(
     let suggestionsSeen = false // latch: once the fence is seen, hide everything after it
     let finishReason = ''
     let pendingCalls: Array<{ id: string; name: string; arguments: string }> = []
+    lastRoundHadThinking = false // 每轮复位，防止跨轮误判 length 截断标记
 
     // Stream from the API
     try {
@@ -108,10 +111,22 @@ export async function runChatLoop(
             }
             break
           }
-          case 'thinking':
-            fullThinking += event.text || ''
-            send({ type: 'thinking', text: event.text || '' })
+          case 'thinking': {
+            const t = event.text || ''
+            if (!t) break
+            // 每轮第一条 thinking 前注入「思考片段 N」分隔符
+            // 始终注入（含第一轮），保证 DB 存储格式与 SSE 流完全一致
+            if (round !== emittedSegmentRound) {
+              emittedSegmentRound = round
+              const header = THINKING_SEGMENT_OPEN + (round + 1) + THINKING_SEGMENT_CLOSE
+              fullThinking += header
+              send({ type: 'thinking', text: header, round })
+            }
+            fullThinking += t
+            send({ type: 'thinking', text: t, round })
+            lastRoundHadThinking = true
             break
+          }
           case 'tool_call':
             pendingCalls = event.toolCalls || []
             finishReason = event.finishReason || 'tool_calls'
@@ -142,6 +157,12 @@ export async function runChatLoop(
     // ---- Pi: stopReason === 'length'（输出 token 上限被截断）----
     // 参数不可信，不执行；把「未执行」作为错误结果回填，让模型尽快用文本收尾。
     if (hasToolCalls && finishReason === 'length') {
+      // 输出长度截断：思考片段可能停在半截词上，打上截断标记供前端提示
+      if (lastRoundHadThinking) {
+        fullThinking += THINKING_TRUNCATED_MARK
+        send({ type: 'thinking', text: THINKING_TRUNCATED_MARK, round })
+        lastRoundHadThinking = false
+      }
       // 回填模型自己的 assistant 消息（含 tool_calls），下一轮才能正确续接
       toolMessages.push({
         role: 'assistant',
@@ -295,13 +316,91 @@ export async function runChatLoop(
 
   // ---- 统一收口（Pi: 每一条路径都有 agent_end，绝不静默 return）----
   // 走到这里只有三种情况：轮数撞顶、工具阶段被终止、最后几轮全是工具调用。
-  // 无论哪种，都用最近一次流式正文兜底，实在没有正文才给出明确提示——绝不给空 reply。
+  // 优先尝试「追加纯文本收尾轮」：用完整上下文（含全部工具结果）让模型直接整理最终回答，
+  // 不再把工具轮里那句半截旁白当最终回复。
+  const finalRound = await runFinalAnswerRound(config, [...baseMessages, ...toolMessages], send, signal)
+  if (finalRound) {
+    send({ type: 'done', reply: finalRound.reply, suggestions: finalRound.suggestions })
+    return { reply: finalRound.reply, suggestions: finalRound.suggestions, thinking: fullThinking, artifacts: producedArtifacts.length > 0 ? producedArtifacts : undefined }
+  }
+
+  // 追加轮失败 / 无正文 → 回退：用最近一次流式正文兜底
   const { reply: baseReply, suggestions: baseSugg } = parseSuggestions(lastFullText)
   // 兜底回复可能自带 fence 代码块（模型在正文里也画了一个），会被 seen 隐藏；这里再剥一层
   const finalText = baseReply.trim().replace(new RegExp(SUGGESTIONS_FENCE + '[\\s\\S]*$'), '').trim()
   const reply = finalText || '（已完成思考但未能给出有效回答：已中止反复的工具调用。请换一种问法重试。）'
   send({ type: 'done', reply, suggestions: baseSugg })
   return { reply, suggestions: baseSugg, thinking: fullThinking, artifacts: producedArtifacts.length > 0 ? producedArtifacts : undefined }
+}
+
+/**
+ * 追加纯文本收尾轮：工具轮数撞顶或工具阶段被终止时，
+ * 用完整上下文（含全部工具结果）发起一次「不带工具、不开思考」的请求，
+ * 让模型直接整理出最终回答（含 suggestions）。失败或空回复返回 null。
+ */
+async function runFinalAnswerRound(
+  config: AppConfig,
+  messages: ChatMessage[],
+  send: SendFn,
+  signal?: AbortSignal,
+): Promise<{ reply: string; suggestions: string[] } | null> {
+  const finalMessages: ChatMessage[] = [
+    ...messages,
+    {
+      role: 'user',
+      content:
+        '工具轮数已用尽。请综合以上所有工具结果，直接用自然语言回答用户最初的请求。' +
+        '不要调用任何工具。如果信息仍不足，请如实说明。' +
+        '回复末尾必须输出 ```suggestions 代码块，恰好 3 条后续建议（用户口吻）。',
+    },
+  ]
+
+  let fullText = ''
+  let pending = ''
+  let suggestionsSeen = false
+
+  try {
+    // 传 [] 作为 tools —— API 请求体不含 tools，模型无法调用工具；thinkingMode=false 强制直接作答
+    for await (const event of streamChatCompletion(config, finalMessages, [], false)) {
+      if (signal?.aborted) break
+      if (event.type === 'token') {
+        const token = event.text || ''
+        fullText += token
+        if (suggestionsSeen) break
+        pending += token
+        const fenceIdx = pending.indexOf(SUGGESTIONS_FENCE)
+        if (fenceIdx !== -1) {
+          suggestionsSeen = true
+          const beforeFence = pending.slice(0, fenceIdx)
+          if (beforeFence) send({ type: 'token', text: beforeFence })
+          pending = ''
+          break
+        }
+        if (pending.length > SUGGESTIONS_FENCE.length) {
+          const safeLen = pending.length - SUGGESTIONS_FENCE.length
+          send({ type: 'token', text: pending.slice(0, safeLen) })
+          pending = pending.slice(safeLen)
+        }
+      }
+      // 忽略 thinking / tool_call —— 收尾轮不应产生它们；若模型仍尝试调用则直接丢弃
+    }
+  } catch (err) {
+    console.warn('Final answer round failed:', (err as Error).message)
+    return null
+  }
+
+  if (signal?.aborted) return null
+
+  // Flush pending buffer
+  if (pending.length > 0) {
+    const fenceIdx = pending.indexOf(SUGGESTIONS_FENCE)
+    if (fenceIdx > 0) send({ type: 'token', text: pending.slice(0, fenceIdx) })
+    else if (fenceIdx === -1) send({ type: 'token', text: pending })
+  }
+
+  const { reply, suggestions } = parseSuggestions(fullText)
+  if (!reply.trim()) return null
+  return { reply, suggestions }
 }
 
 function buildSystemPrompt(config: AppConfig, thinkingMode: boolean): string {

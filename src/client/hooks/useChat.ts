@@ -2,12 +2,17 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, getUser, getToken } from '../lib/api'
 import type { Conversation, Attachment } from '@/shared/types'
+import type { ThinkingSegment } from '@/shared/thinking'
+import { decodeThinkingToSegments, thinkingSegmentHeader } from '@/shared/thinking'
 
 interface ChatMessage {
   id?: number
   role: 'user' | 'assistant'
   content: string
+  /** 兼容字段：DB 里存的是含分隔符的纯文本；历史消息用它。 */
   thinking?: string
+  /** 结构化分块：按工具轮 round 分组。优先于 thinking 渲染。 */
+  thinkingSegments?: ThinkingSegment[]
   toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; status?: 'running' | 'done' | 'error'; result?: string; artifacts?: Array<{ filename: string; displayName: string; mimeType: string; downloadUrl: string }> }>
   suggestions?: string[]
   attachments?: Attachment[]
@@ -48,6 +53,7 @@ export function useChat() {
             role: m.role as 'user' | 'assistant',
             content: m.content,
             thinking: m.thinking || undefined,
+            thinkingSegments: decodeThinkingToSegments(m.thinking),
             toolCalls: m.tool_calls as any || undefined,
             suggestions: m.suggestions as any || undefined,
             attachments: m.attachments as any || undefined,
@@ -80,6 +86,7 @@ export function useChat() {
               role: m.role as 'user' | 'assistant',
               content: m.content,
               thinking: m.thinking || undefined,
+            thinkingSegments: decodeThinkingToSegments(m.thinking),
               toolCalls: m.tool_calls as any || undefined,
               suggestions: m.suggestions as any || undefined,
               attachments: m.attachments as any || undefined,
@@ -112,7 +119,7 @@ export function useChat() {
     if (!text.trim() || loading) return
 
     const userMsg: ChatMessage = { role: 'user', content: text, attachments }
-    const assistantMsg: ChatMessage = { role: 'assistant', content: '', streaming: true }
+    const assistantMsg: ChatMessage = { role: 'assistant', content: '', streaming: true, thinkingSegments: [] }
     setMessages((prev) => [...prev, userMsg, assistantMsg])
     setLoading(true)
 
@@ -265,6 +272,7 @@ export function useChat() {
             role: m.role as 'user' | 'assistant',
             content: m.content,
             thinking: m.thinking || undefined,
+            thinkingSegments: decodeThinkingToSegments(m.thinking),
             toolCalls: m.tool_calls as any || undefined,
             suggestions: m.suggestions as any || undefined,
             attachments: m.attachments as any || undefined,
@@ -304,13 +312,30 @@ export function useChat() {
         })
         break
 
-      case 'thinking':
+      case 'thinking': {
+        // 「唯一事实源」：thinking 纯文本（即服务端下发序列，含分隔符）作为真源，
+        // thinkingSegments 每次都从它派生（同一套 decode 也用于历史加载）。
+        const segRound = typeof msg.round === 'number' ? msg.round : undefined
         setMessages((prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant') return prev
-          return [...prev.slice(0, -1), { ...last, thinking: (last.thinking || '') + msg.text }]
+          const newThinking = (last.thinking || '') + msg.text
+          // 是否为本轮第一条 thinking（服务端会在每轮首个 thinking 前先下发分隔符事件）
+          const isSegmentHeader = typeof segRound === 'number' && msg.text === thinkingSegmentHeader(segRound)
+          let segments = last.thinkingSegments || []
+          if (isSegmentHeader) {
+            segments = [...segments, { round: segRound, text: '' }]
+          } else if (segments.length === 0) {
+            segments = [{ round: 0, text: msg.text }]
+          } else {
+            const updated = [...segments]
+            updated[updated.length - 1] = { ...updated[updated.length - 1], text: updated[updated.length - 1].text + msg.text }
+            segments = updated
+          }
+          return [...prev.slice(0, -1), { ...last, thinking: newThinking, thinkingSegments: segments }]
         })
         break
+      }
 
       case 'tool_call':
       case 'tool_execution_start':
